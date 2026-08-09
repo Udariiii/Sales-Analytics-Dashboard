@@ -1,6 +1,7 @@
 "use client";
 
 import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AccountMenu } from "@/components/account-menu";
 
 type SalesRow = {
   date: string;
@@ -39,7 +40,6 @@ type ModelResult = {
   predictions: number[];
 };
 
-const SAMPLE_FILE = "/data/sri_lanka_supermarket_sales_2025.csv";
 const money = new Intl.NumberFormat("en-LK", { style: "currency", currency: "LKR", maximumFractionDigits: 0 });
 const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
 const number = new Intl.NumberFormat("en-LK", { maximumFractionDigits: 0 });
@@ -69,7 +69,7 @@ function parseCsv(text: string): string[][] {
 
 function detectSlashDateOrder(values: string[]): "dmy" | "mdy" {
   for (const value of values) {
-    const parts = value.trim().split(/[\/-]/).map(Number);
+    const parts = value.trim().split(/[/-]/).map(Number);
     if (parts.length !== 3 || parts.some((part) => !Number.isFinite(part))) continue;
     if (parts[0] > 12) return "dmy";
     if (parts[1] > 12) return "mdy";
@@ -80,7 +80,7 @@ function detectSlashDateOrder(values: string[]): "dmy" | "mdy" {
 function normalizeDate(value: string, slashOrder: "dmy" | "mdy"): string {
   const raw = value.trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
-  const parts = raw.split(/[\/-]/).map(Number);
+  const parts = raw.split(/[/-]/).map(Number);
   if (parts.length !== 3 || parts.some((part) => !Number.isFinite(part))) return "";
   let year: number, month: number, day: number;
   if (String(parts[0]).length === 4) [year, month, day] = parts;
@@ -224,7 +224,7 @@ function LineChart({ historical, forecast, mode }: { historical: DailyPoint[]; f
     }
     const draw = (vals: number[], offset: number, color: string, dashed = false) => {
       ctx.beginPath(); ctx.strokeStyle = color; ctx.lineWidth = 2.5; ctx.setLineDash(dashed ? [6, 5] : []);
-      vals.forEach((v, i) => { const xx = x(i + offset), yy = y(v); i ? ctx.lineTo(xx, yy) : ctx.moveTo(xx, yy); });
+      vals.forEach((v, i) => { const xx = x(i + offset), yy = y(v); if (i) ctx.lineTo(xx, yy); else ctx.moveTo(xx, yy); });
       ctx.stroke(); ctx.setLineDash([]);
     };
     draw(history.map((d) => d.sales), 0, "#13A6A0");
@@ -232,7 +232,7 @@ function LineChart({ historical, forecast, mode }: { historical: DailyPoint[]; f
       const offset = history.length - 1;
       const joined = [history.at(-1)!.sales, ...forecast.map((d) => d.value)];
       ctx.beginPath();
-      forecast.forEach((d, i) => { const xx = x(offset + i + 1), yy = y(d.upper); i ? ctx.lineTo(xx, yy) : ctx.moveTo(xx, yy); });
+      forecast.forEach((d, i) => { const xx = x(offset + i + 1), yy = y(d.upper); if (i) ctx.lineTo(xx, yy); else ctx.moveTo(xx, yy); });
       [...forecast].reverse().forEach((d, reverseIndex) => { const i = forecast.length - 1 - reverseIndex; ctx.lineTo(x(offset + i + 1), y(d.lower)); });
       ctx.closePath(); ctx.fillStyle = "rgba(244,185,66,.2)"; ctx.fill();
       draw(joined, offset, "#E59C16", true);
@@ -249,8 +249,8 @@ function Icon({ children }: { children: React.ReactNode }) { return <span classN
 
 export default function Home() {
   const [rows, setRows] = useState<SalesRow[]>([]);
-  const [fileName, setFileName] = useState("sri_lanka_supermarket_sales_2025.csv");
-  const [loading, setLoading] = useState(true);
+  const [fileName, setFileName] = useState("");
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [uploadNotice, setUploadNotice] = useState("");
   const [section, setSection] = useState<"overview" | "forecast" | "products" | "methodology">("overview");
@@ -277,12 +277,6 @@ export default function Home() {
       finally { setLoading(false); }
     }, 20);
   }, []);
-
-  useEffect(() => {
-    fetch(SAMPLE_FILE).then((r) => { if (!r.ok) throw new Error("Sample CSV could not be loaded."); return r.text(); })
-      .then((text) => loadText(text, "sri_lanka_supermarket_sales_2025.csv"))
-      .catch((e) => { setError(e.message); setLoading(false); });
-  }, [loadText]);
 
   const upload = (event: ChangeEvent<HTMLInputElement>) => {
     const input = event.currentTarget;
@@ -347,11 +341,50 @@ export default function Home() {
   const maxProduct = productSales[0]?.[1] || 1;
   const maxWeekday = Math.max(...weekday.map((d) => d.value), 1);
   const paymentTotal = payments.reduce((a, b) => a + b[1], 0) || 1;
-  let paymentCursor = 0;
   const paymentColors = ["#13A6A0", "#17324D", "#F4B942", "#8D6CCF", "#EF7B68"];
-  const donut = `conic-gradient(${payments.map((p, i) => { const start = paymentCursor; paymentCursor += p[1] / paymentTotal * 100; return `${paymentColors[i % paymentColors.length]} ${start}% ${paymentCursor}%`; }).join(",")})`;
+  const donutStops = payments.reduce<{ cursor: number; stops: string[] }>((result, payment, index) => {
+    const start = result.cursor;
+    const end = start + payment[1] / paymentTotal * 100;
+    return { cursor: end, stops: [...result.stops, `${paymentColors[index % paymentColors.length]} ${start}% ${end}%`] };
+  }, { cursor: 0, stops: [] });
+  const donut = `conic-gradient(${donutStops.stops.join(",")})`;
 
-  if (loading) return <main className="loading"><div className="loading-mark">RP</div><h1>Preparing your sales intelligence</h1><p>Reading transactions and training the forecast model...</p><div className="loader"><span /></div></main>;
+  if (loading) return <main className="loading"><div className="loading-mark">RP</div><h1>Preparing your sales intelligence</h1><p>Validating your transactions and calculating the forecast...</p><div className="loader"><span /></div></main>;
+
+  if (!rows.length) return (
+    <main className="app-shell empty-shell">
+      <aside className="sidebar">
+        <div className="brand"><div className="brand-mark">RP</div><div><strong>RetailPulse</strong><span>AI Sales Intelligence</span></div></div>
+        <nav aria-label="Dashboard sections">
+          <button className="active"><Icon>⌂</Icon>Get started</button>
+          <button disabled><Icon>↗</Icon>Predictive analysis</button>
+          <button disabled><Icon>▦</Icon>Products & categories</button>
+          <button disabled><Icon>◎</Icon>Methodology</button>
+        </nav>
+        <div className="sidebar-note"><span>Private workspace</span><p>Your uploaded file is processed locally in this browser.</p></div>
+      </aside>
+      <section className="workspace">
+        <header className="topbar">
+          <div><p className="eyebrow">SME PERFORMANCE CENTRE</p><h1>Start your sales analysis</h1></div>
+          <AccountMenu />
+        </header>
+        {error && <div className="error-banner"><strong>CSV issue</strong><span>{error}</span></div>}
+        <section className="empty-upload">
+          <div className="empty-upload-mark" aria-hidden="true">⇧</div>
+          <p className="eyebrow">YOUR DATA, YOUR WORKSPACE</p>
+          <h2>Upload a sales CSV to begin</h2>
+          <p>RetailPulse does not include or preload transaction data. Select your own file and the dashboard will validate and analyse it in your browser.</p>
+          <label className="upload-button upload-primary">Choose CSV file<input aria-label="Upload sales CSV" type="file" accept=".csv,text/csv" onChange={upload} /></label>
+          <div className="upload-requirements">
+            <div><strong>Accepted format</strong><span>CSV with a header row</span></div>
+            <div><strong>Required fields</strong><span>Date, Invoice ID, Category, Product, Quantity, Net Sales and Profit</span></div>
+            <div><strong>Privacy</strong><span>The file is not uploaded to a server or retained after you close the tab</span></div>
+          </div>
+        </section>
+        <footer><span>RetailPulse AI · CIS 6000 Research Prototype</span><span>Predictions support decisions; they do not replace managerial judgement.</span></footer>
+      </section>
+    </main>
+  );
 
   return (
     <main className="app-shell">
@@ -372,6 +405,7 @@ export default function Home() {
           <div className="top-actions">
             <div className="data-status"><span className="status-dot" /><div><strong>{fileName}</strong><small>{number.format(rows.length)} validated lines</small></div></div>
             <label className="upload-button">Upload CSV<input aria-label="Upload sales CSV" type="file" accept=".csv,text/csv" onChange={upload} /></label>
+            <AccountMenu />
           </div>
         </header>
 
@@ -425,7 +459,7 @@ export default function Home() {
           <div className="method-intro"><p className="eyebrow">TRANSPARENT PREDICTIVE ANALYTICS</p><h2>Forecasts that can be explained and evaluated</h2><p>The dashboard separates descriptive reporting from genuine forward-looking analysis. Predictions are calculated from historical transactions; the executive summary only explains those calculated results.</p></div>
           <div className="method-flow"><article><span>1</span><div><h3>Prepare</h3><p>Validate the CSV and aggregate transaction lines into daily sales, profit, units and invoice counts.</p></div></article><article><span>2</span><div><h3>Engineer features</h3><p>Measure weekly seasonality, weekday behaviour, recent momentum and calendar-month effects.</p></div></article><article><span>3</span><div><h3>Backtest</h3><p>Reserve the final historical days as unseen test data. Random train/test splitting is deliberately avoided.</p></div></article><article><span>4</span><div><h3>Select</h3><p>Compare a seasonal baseline with a trend-and-weekday statistical model using WAPE and MAE.</p></div></article><article><span>5</span><div><h3>Forecast</h3><p>Retrain on the complete history, predict 7 or 30 days, and display a model-error-based interval.</p></div></article></div>
           <div className="method-cards"><article><p>PRIMARY METRIC</p><strong>WAPE</strong><span>Weighted absolute percentage error provides a stable accuracy measure for retail revenue.</span></article><article><p>CONTROL MODEL</p><strong>Seasonal naive</strong><span>A credible predictive model should improve on simply repeating last week.</span></article><article><p>RESPONSIBLE LIMIT</p><strong>One year</strong><span>Category and top-product forecasts are more defensible than sparse forecasts for every SKU.</span></article></div>
-          <div className="disclosure"><strong>Data-use disclosure</strong><p>The included demonstration dataset is synthetic and modeled on realistic Sri Lankan supermarket operations. It should be described as simulated data in academic reporting.</p></div>
+          <div className="disclosure"><strong>Data-use disclosure</strong><p>RetailPulse does not include a sales dataset. Users must upload their own CSV, which is processed locally in the browser and is not retained by the application.</p></div>
         </section>}
         <footer><span>RetailPulse AI · CIS 6000 Research Prototype</span><span>Predictions support decisions; they do not replace managerial judgement.</span></footer>
       </section>

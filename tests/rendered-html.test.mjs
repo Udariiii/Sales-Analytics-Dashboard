@@ -9,20 +9,20 @@ async function render() {
   workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
   const { default: worker } = await import(workerUrl.href);
   return worker.fetch(
-    new Request("http://localhost/", { headers: { accept: "text/html", host: "localhost" } }),
+    new Request("http://localhost/login", { headers: { accept: "text/html", host: "localhost" } }),
     { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
     { waitUntil() {}, passThroughOnException() {} },
   );
 }
 
-test("server-renders the RetailPulse application shell", async () => {
+test("server-renders the RetailPulse authentication shell", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
   const html = await response.text();
   assert.match(html, /<title>RetailPulse AI \| SME Sales Intelligence<\/title>/i);
-  assert.match(html, /Preparing your sales intelligence/);
-  assert.match(html, /Reading transactions and training the forecast model/);
+  assert.match(html, /Sign in to your workspace/);
+  assert.match(html, /Continue with Google/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/);
 });
 
@@ -32,7 +32,7 @@ test("includes the CSV analytics and predictive-analysis implementation", async 
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
-  assert.match(page, /sri_lanka_supermarket_sales_2025\.csv/);
+  assert.doesNotMatch(page, /sri_lanka_supermarket_sales_2025\.csv/);
   assert.match(page, /function parseCsv/);
   assert.match(page, /function normalizeDate/);
   assert.match(page, /detectSlashDateOrder/);
@@ -45,8 +45,11 @@ test("includes the CSV analytics and predictive-analysis implementation", async 
   assert.match(page, /WAPE/);
   assert.match(layout, /og\.png/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
-  await access(new URL("../public/data/sri_lanka_supermarket_sales_2025.csv", import.meta.url));
+  await assert.rejects(access(new URL("../public/data/sri_lanka_supermarket_sales_2025.csv", import.meta.url)));
   await access(new URL("../public/og.png", import.meta.url));
+  await access(new URL("../app/login/page.tsx", import.meta.url));
+  await access(new URL("../app/signup/page.tsx", import.meta.url));
+  await access(new URL("../proxy.ts", import.meta.url));
   await assert.rejects(access(new URL("../app/_sites-preview/SkeletonPreview.tsx", import.meta.url)));
   await access(root);
 });
