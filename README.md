@@ -30,6 +30,19 @@ Then open `http://localhost:3000`.
 npm test
 ```
 
+## Deployment
+
+The production application is a client-side analytics dashboard and does not
+require a separate backend service. Deploy the GitHub repository to Vercel with
+the Next.js preset; Vercel will run `npm run build` automatically. Node.js 22 is
+declared in `package.json`.
+
+The legacy Sites/Cloudflare-compatible build remains available through:
+
+```bash
+npm run build:sites
+```
+
 ## Dataset disclosure
 
 The included demonstration dataset is synthetic and modeled on realistic Sri Lankan supermarket operations. It contains no records obtained from an actual supermarket and should be described as simulated data in academic reporting.
