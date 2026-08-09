@@ -34,7 +34,12 @@ test("includes the CSV analytics and predictive-analysis implementation", async 
   ]);
   assert.match(page, /sri_lanka_supermarket_sales_2025\.csv/);
   assert.match(page, /function parseCsv/);
+  assert.match(page, /function normalizeDate/);
+  assert.match(page, /detectSlashDateOrder/);
   assert.match(page, /function buildForecast/);
+  assert.match(page, /Upload complete/);
+  assert.match(page, /loaded successfully/);
+  assert.match(page, /input\.value = ""/);
   assert.match(page, /Seasonal naive/);
   assert.match(page, /Trend \+ weekday model/);
   assert.match(page, /WAPE/);

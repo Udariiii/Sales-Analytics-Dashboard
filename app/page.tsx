@@ -67,6 +67,33 @@ function parseCsv(text: string): string[][] {
   return result;
 }
 
+function detectSlashDateOrder(values: string[]): "dmy" | "mdy" {
+  for (const value of values) {
+    const parts = value.trim().split(/[\/-]/).map(Number);
+    if (parts.length !== 3 || parts.some((part) => !Number.isFinite(part))) continue;
+    if (parts[0] > 12) return "dmy";
+    if (parts[1] > 12) return "mdy";
+  }
+  return "dmy";
+}
+
+function normalizeDate(value: string, slashOrder: "dmy" | "mdy"): string {
+  const raw = value.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const parts = raw.split(/[\/-]/).map(Number);
+  if (parts.length !== 3 || parts.some((part) => !Number.isFinite(part))) return "";
+  let year: number, month: number, day: number;
+  if (String(parts[0]).length === 4) [year, month, day] = parts;
+  else {
+    year = parts[2];
+    if (slashOrder === "dmy") { day = parts[0]; month = parts[1]; }
+    else { month = parts[0]; day = parts[1]; }
+  }
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return "";
+  return date.toISOString().slice(0, 10);
+}
+
 function toRows(text: string): SalesRow[] {
   const parsed = parseCsv(text);
   if (parsed.length < 2) throw new Error("The CSV does not contain sales records.");
@@ -74,15 +101,18 @@ function toRows(text: string): SalesRow[] {
   const required = ["Sale_Date", "Invoice_ID", "Category", "Product_Name", "Quantity", "Net_Sales_LKR", "Gross_Profit_LKR"];
   const missing = required.filter((key) => index[key] === undefined);
   if (missing.length) throw new Error(`Missing required columns: ${missing.join(", ")}`);
+  const slashDateOrder = detectSlashDateOrder(parsed.slice(1, 1000).map((r) => r[index.Sale_Date] || ""));
   const n = (r: string[], key: string) => Number(r[index[key]] || 0);
   const s = (r: string[], key: string) => r[index[key]]?.trim() || "Unknown";
-  return parsed.slice(1).map((r) => ({
-    date: s(r, "Sale_Date"), invoice: s(r, "Invoice_ID"), category: s(r, "Category"),
+  const rows = parsed.slice(1).map((r) => ({
+    date: normalizeDate(s(r, "Sale_Date"), slashDateOrder), invoice: s(r, "Invoice_ID"), category: s(r, "Category"),
     product: s(r, "Product_Name"), sku: s(r, "SKU"), quantity: n(r, "Quantity"),
     gross: n(r, "Gross_Sales_LKR"), discount: n(r, "Discount_Amount_LKR"),
     net: n(r, "Net_Sales_LKR"), profit: n(r, "Gross_Profit_LKR"),
     payment: s(r, "Payment_Method"), promotion: s(r, "Promotion"),
   })).filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.date) && Number.isFinite(r.net));
+  if (!rows.length) throw new Error("No valid sales rows were found. Check the Sale_Date and numeric columns.");
+  return rows;
 }
 
 function addDays(date: string, days: number) {
@@ -222,15 +252,27 @@ export default function Home() {
   const [fileName, setFileName] = useState("sri_lanka_supermarket_sales_2025.csv");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [uploadNotice, setUploadNotice] = useState("");
   const [section, setSection] = useState<"overview" | "forecast" | "products" | "methodology">("overview");
   const [category, setCategory] = useState("All categories");
   const [period, setPeriod] = useState("Full year");
   const [forecastDays, setForecastDays] = useState(30);
 
-  const loadText = useCallback((text: string, name: string) => {
+  const loadText = useCallback((text: string, name: string, announce = false) => {
     setLoading(true); setError("");
+    if (announce) setUploadNotice("");
     window.setTimeout(() => {
-      try { const parsed = toRows(text); setRows(parsed); setFileName(name); }
+      try {
+        const parsed = toRows(text);
+        setRows(parsed);
+        setFileName(name);
+        if (announce) {
+          setCategory("All categories");
+          setPeriod("Full year");
+          setSection("overview");
+          setUploadNotice(`${name} loaded successfully — ${number.format(parsed.length)} sales lines are now displayed.`);
+        }
+      }
       catch (e) { setError(e instanceof Error ? e.message : "Unable to read the CSV file."); }
       finally { setLoading(false); }
     }, 20);
@@ -243,9 +285,13 @@ export default function Home() {
   }, [loadText]);
 
   const upload = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]; if (!file) return;
+    const input = event.currentTarget;
+    const file = input.files?.[0]; if (!file) return;
     if (!file.name.toLowerCase().endsWith(".csv")) { setError("Please select a CSV file."); return; }
-    file.text().then((text) => loadText(text, file.name));
+    file.text()
+      .then((text) => loadText(text, file.name, true))
+      .catch(() => setError("The selected CSV file could not be read."))
+      .finally(() => { input.value = ""; });
   };
 
   const categories = useMemo(() => ["All categories", ...new Set(rows.map((r) => r.category))], [rows]);
@@ -325,11 +371,12 @@ export default function Home() {
           <div><p className="eyebrow">SME PERFORMANCE CENTRE</p><h1>{section === "overview" ? "Sales overview" : section === "forecast" ? "Predictive analysis" : section === "products" ? "Product intelligence" : "Model methodology"}</h1></div>
           <div className="top-actions">
             <div className="data-status"><span className="status-dot" /><div><strong>{fileName}</strong><small>{number.format(rows.length)} validated lines</small></div></div>
-            <label className="upload-button">Upload CSV<input type="file" accept=".csv,text/csv" onChange={upload} /></label>
+            <label className="upload-button">Upload CSV<input aria-label="Upload sales CSV" type="file" accept=".csv,text/csv" onChange={upload} /></label>
           </div>
         </header>
 
         {error && <div className="error-banner"><strong>CSV issue</strong><span>{error}</span></div>}
+        {uploadNotice && <div className="upload-success" role="status" data-testid="upload-status"><span className="success-check">✓</span><div><strong>Upload complete</strong><span>{uploadNotice}</span></div><button aria-label="Dismiss upload message" onClick={() => setUploadNotice("")}>×</button></div>}
 
         {section !== "methodology" && <div className="filterbar">
           <label>Category<select value={category} onChange={(e) => setCategory(e.target.value)}>{categories.map((c) => <option key={c}>{c}</option>)}</select></label>
