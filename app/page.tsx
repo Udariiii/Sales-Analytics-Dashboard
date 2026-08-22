@@ -10,6 +10,7 @@ import { AnalyticsCapabilities, applyMapping, createImportPreview, ImportReport,
 
 const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
 const number = new Intl.NumberFormat("en-LK", { maximumFractionDigits: 0 });
+const paymentColors = ["#13A6A0", "#17324D", "#F4B942", "#8D6CCF", "#EF7B68"];
 
 function aggregateDaily(rows: FlexibleSalesRow[]): DailyPoint[] {
   const map = new Map<string, { sales: number; profit: number; units: number; invoices: Set<string> }>();
@@ -35,6 +36,7 @@ function sumBy(rows: FlexibleSalesRow[], key: keyof FlexibleSalesRow, value: key
 
 function pct(value: number) { return `${(value * 100).toFixed(1)}%`; }
 function shortDate(date: string) { return new Date(`${date}T00:00:00Z`).toLocaleDateString("en-LK", { day: "numeric", month: "short" }); }
+function fullDate(date: string) { return new Date(`${date}T00:00:00Z`).toLocaleDateString("en-LK", { weekday: "short", day: "numeric", month: "short", year: "numeric" }); }
 
 function friendlyModelName(name: string) {
   const normalized = name.toLowerCase();
@@ -58,8 +60,11 @@ function detectCurrency(headers: string[]) {
   return "LKR";
 }
 
-function LineChart({ historical, forecast, mode }: { historical: DailyPoint[]; forecast: ForecastPoint[]; mode: "history" | "forecast" }) {
+type LineTooltip = { left: number; top: number; date: string; label: string; value: string; range?: string };
+
+function LineChart({ historical, forecast, mode, currency }: { historical: DailyPoint[]; forecast: ForecastPoint[]; mode: "history" | "forecast"; currency: string }) {
   const ref = useRef<HTMLCanvasElement>(null);
+  const [tooltip, setTooltip] = useState<LineTooltip | null>(null);
   useEffect(() => {
     const canvas = ref.current;
     if (!canvas) return;
@@ -82,7 +87,7 @@ function LineChart({ historical, forecast, mode }: { historical: DailyPoint[]; f
     };
     const labels = mode === "history" ? [history[0]?.date, history[Math.floor(history.length / 2)]?.date, history.at(-1)?.date] : [history[0]?.date, history.at(-1)?.date, forecast.at(-1)?.date];
     const allValues = [...history.map((d) => d.sales), ...forecast.map((d) => d.value)];
-    const render = (progress: number) => {
+    const render = (progress: number, hoveredIndex: number | null = null) => {
       ctx.clearRect(0, 0, width, height);
       ctx.font = "11px Segoe UI, Arial"; ctx.textAlign = "left"; ctx.fillStyle = "#718096"; ctx.strokeStyle = "#E2E8F0"; ctx.lineWidth = 1;
       for (let i = 0; i <= 4; i++) {
@@ -106,7 +111,7 @@ function LineChart({ historical, forecast, mode }: { historical: DailyPoint[]; f
       }
       ctx.restore();
 
-      if (allValues.length > 1 && progress > 0.02) {
+      if (hoveredIndex === null && allValues.length > 1 && progress > 0.02) {
         const position = (allValues.length - 1) * progress;
         const left = Math.floor(position), right = Math.min(allValues.length - 1, left + 1), fraction = position - left;
         const markerValue = allValues[left] + (allValues[right] - allValues[left]) * fraction;
@@ -117,6 +122,16 @@ function LineChart({ historical, forecast, mode }: { historical: DailyPoint[]; f
 
       ctx.fillStyle = "#718096"; ctx.textAlign = "center";
       labels.forEach((label, i) => { if (label) ctx.fillText(shortDate(label), pad.l + i * (width - pad.l - pad.r) / 2, height - 10); });
+
+      if (hoveredIndex !== null) {
+        const xx = x(hoveredIndex), yy = y(allValues[hoveredIndex]);
+        ctx.save();
+        ctx.setLineDash([3, 4]); ctx.strokeStyle = "#8EA4B4"; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(xx, pad.t); ctx.lineTo(xx, height - pad.b); ctx.stroke();
+        ctx.setLineDash([]); ctx.beginPath(); ctx.arc(xx, yy, 5, 0, Math.PI * 2);
+        ctx.fillStyle = hoveredIndex < history.length ? "#0C9B8E" : "#D99518"; ctx.fill();
+        ctx.lineWidth = 2.5; ctx.strokeStyle = "#FFFFFF"; ctx.stroke(); ctx.restore();
+      }
     };
 
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -131,10 +146,68 @@ function LineChart({ historical, forecast, mode }: { historical: DailyPoint[]; f
       };
       animationFrame = requestAnimationFrame(animate);
     }
-    return () => cancelAnimationFrame(animationFrame);
-  }, [historical, forecast, mode]);
-  return <canvas ref={ref} className="line-canvas" aria-label={mode === "forecast" ? "Historical and forecast sales line chart" : "Historical daily sales line chart"} />;
+
+    const money = new Intl.NumberFormat("en", { style: "currency", currency, maximumFractionDigits: 0 });
+    const hideTooltip = () => { setTooltip(null); render(1); };
+    const showTooltip = (event: PointerEvent) => {
+      cancelAnimationFrame(animationFrame);
+      const rect = canvas.getBoundingClientRect();
+      const localX = (event.clientX - rect.left) * width / Math.max(1, rect.width);
+      const index = Math.max(0, Math.min(allValues.length - 1, Math.round((localX - pad.l) / Math.max(1, width - pad.l - pad.r) * (count - 1))));
+      const pointX = x(index), pointY = y(allValues[index]);
+      const isForecast = index >= history.length;
+      const forecastPoint = isForecast ? forecast[index - history.length] : null;
+      const date = isForecast ? forecastPoint!.date : history[index].date;
+      setTooltip({
+        left: Math.max(86, Math.min(width - 86, pointX)),
+        top: Math.max(20, pointY - 10),
+        date: fullDate(date),
+        label: isForecast ? "Expected sales" : "Sales",
+        value: money.format(allValues[index]),
+        range: forecastPoint ? `${money.format(forecastPoint.lower)} – ${money.format(forecastPoint.upper)}` : undefined,
+      });
+      render(1, index);
+    };
+    canvas.addEventListener("pointermove", showTooltip);
+    canvas.addEventListener("pointerleave", hideTooltip);
+    return () => {
+      cancelAnimationFrame(animationFrame);
+      canvas.removeEventListener("pointermove", showTooltip);
+      canvas.removeEventListener("pointerleave", hideTooltip);
+    };
+  }, [historical, forecast, mode, currency]);
+  return <div className="line-chart-wrap"><canvas ref={ref} className="line-canvas" aria-label={mode === "forecast" ? "Historical and forecast sales line chart. Hover to see daily values." : "Historical daily sales line chart. Hover to see daily values."} />{tooltip && <div className="chart-tooltip line-tooltip" role="tooltip" style={{ left: tooltip.left, top: tooltip.top }}><strong>{tooltip.date}</strong><span>{tooltip.label}: {tooltip.value}</span>{tooltip.range && <small>Likely range: {tooltip.range}</small>}</div>}</div>;
 }
+
+function PaymentDonut({ payments, currency }: { payments: [string, number][]; currency: string }) {
+  const [tooltip, setTooltip] = useState<{ left: number; top: number; name: string; value: string; share: string } | null>(null);
+  const total = payments.reduce((sum, payment) => sum + payment[1], 0) || 1;
+  const stops = payments.reduce<{ cursor: number; stops: string[] }>((result, payment, index) => {
+    const start = result.cursor, end = start + payment[1] / total * 100;
+    return { cursor: end, stops: [...result.stops, `${paymentColors[index % paymentColors.length]} ${start}% ${end}%`] };
+  }, { cursor: 0, stops: [] });
+  const donut = `conic-gradient(${stops.stops.join(",")})`;
+  const money = useMemo(() => new Intl.NumberFormat("en", { style: "currency", currency, maximumFractionDigits: 0 }), [currency]);
+  const showTooltip = (event: React.PointerEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = event.clientX - rect.left, y = event.clientY - rect.top;
+    const dx = x - rect.width / 2, dy = y - rect.height / 2;
+    const radius = Math.sqrt(dx * dx + dy * dy);
+    if (radius < 35 || radius > rect.width / 2 + 4) { setTooltip(null); return; }
+    const angle = (Math.atan2(dy, dx) * 180 / Math.PI + 450) % 360;
+    let cursor = 0;
+    const selected = payments.find((payment) => { cursor += payment[1] / total * 360; return angle <= cursor; }) || payments.at(-1);
+    if (!selected) return;
+    setTooltip({ left: Math.max(68, Math.min(rect.width - 68, x)), top: Math.max(10, y - 10), name: selected[0], value: money.format(selected[1]), share: pct(selected[1] / total) });
+  };
+  return <div className="donut-wrap"><div className="donut-interaction"><div className="donut" style={{ background: donut }} onPointerMove={showTooltip} onPointerLeave={() => setTooltip(null)} role="img" aria-label="Payment method share chart. Hover a section to see exact sales."><span><strong>{payments.length}</strong>methods</span></div>{tooltip && <div className="chart-tooltip donut-tooltip" role="tooltip" style={{ left: tooltip.left, top: tooltip.top }}><strong>{tooltip.name}</strong><span>{tooltip.value}</span><small>{tooltip.share} of sales</small></div>}</div><div className="donut-legend">{payments.map(([name, value], i) => <div key={name} title={`${name}: ${money.format(value)} (${pct(value / total)})`}><i style={{ background: paymentColors[i % paymentColors.length] }} /><span>{name}</span><strong>{pct(value / total)}</strong></div>)}</div></div>;
+}
+
+function WeekdayChart({ days, max, currency }: { days: { name: string; value: number }[]; max: number; currency: string }) {
+  const money = useMemo(() => new Intl.NumberFormat("en", { style: "currency", currency, maximumFractionDigits: 0 }), [currency]);
+  return <div className="weekday-chart">{days.map((day) => <button type="button" className="weekday-column" key={day.name} aria-label={`${day.name}: average sales ${money.format(day.value)}`}><span>{compact.format(day.value)}</span><i style={{ height: `${Math.max(7, day.value / max * 100)}%` }} /><small>{day.name}</small><div className="chart-tooltip weekday-tooltip" role="tooltip"><strong>{day.name}</strong><span>Average sales</span><small>{money.format(day.value)}</small></div></button>)}</div>;
+}
+
 function Icon({ children }: { children: React.ReactNode }) { return <span className="icon" aria-hidden="true">{children}</span>; }
 
 type DeepSeekInsight = { headline: string; summary: string; actions: string[]; risks: string[] };
@@ -345,14 +418,6 @@ export default function Home() {
   const maxCategory = categorySales[0]?.[1] || 1;
   const maxProduct = productSales[0]?.[1] || 1;
   const maxWeekday = Math.max(...weekday.map((d) => d.value), 1);
-  const paymentTotal = payments.reduce((a, b) => a + b[1], 0) || 1;
-  const paymentColors = ["#13A6A0", "#17324D", "#F4B942", "#8D6CCF", "#EF7B68"];
-  const donutStops = payments.reduce<{ cursor: number; stops: string[] }>((result, payment, index) => {
-    const start = result.cursor;
-    const end = start + payment[1] / paymentTotal * 100;
-    return { cursor: end, stops: [...result.stops, `${paymentColors[index % paymentColors.length]} ${start}% ${end}%`] };
-  }, { cursor: 0, stops: [] });
-  const donut = `conic-gradient(${donutStops.stops.join(",")})`;
 
   const generateDeepSeekInsight = async () => {
     if (!forecast) return;
@@ -477,10 +542,10 @@ export default function Home() {
           </section>}
 
           <section className="dashboard-grid">
-            <article className="panel span-2"><div className="panel-head"><div><p>SALES MOVEMENT</p><h2>How your sales changed over time</h2></div><span className="legend"><i />Your sales</span></div><LineChart historical={dailyFiltered} forecast={[]} mode="history" /></article>
+            <article className="panel span-2"><div className="panel-head"><div><p>SALES MOVEMENT</p><h2>How your sales changed over time</h2></div><span className="legend"><i />Your sales</span></div><LineChart historical={dailyFiltered} forecast={[]} mode="history" currency={currency} /></article>
             {capabilities.category && <article className="panel"><div className="panel-head"><div><p>WHERE MONEY COMES FROM</p><h2>Sales by category</h2></div></div><div className="bar-list">{categorySales.slice(0, 7).map(([name, value]) => <div className="bar-row" key={name}><div><span>{name}</span><strong>{compact.format(value)}</strong></div><div className="bar-track"><i style={{ width: `${value / maxCategory * 100}%` }} /></div></div>)}</div></article>}
-            {capabilities.payment && <article className="panel"><div className="panel-head"><div><p>HOW CUSTOMERS PAY</p><h2>Payment methods used</h2></div></div><div className="donut-wrap"><div className="donut" style={{ background: donut }}><span><strong>{payments.length}</strong>methods</span></div><div className="donut-legend">{payments.map(([name, value], i) => <div key={name}><i style={{ background: paymentColors[i % paymentColors.length] }} /><span>{name}</span><strong>{pct(value / paymentTotal)}</strong></div>)}</div></div></article>}
-            <article className="panel"><div className="panel-head"><div><p>BUSIEST DAYS</p><h2>Your average sales by weekday</h2></div></div><div className="weekday-chart">{weekday.map((d) => <div key={d.name}><span>{compact.format(d.value)}</span><i style={{ height: `${Math.max(7, d.value / maxWeekday * 100)}%` }} /><small>{d.name}</small></div>)}</div></article>
+            {capabilities.payment && <article className="panel"><div className="panel-head"><div><p>HOW CUSTOMERS PAY</p><h2>Payment methods used</h2></div></div><PaymentDonut payments={payments} currency={currency} /></article>}
+            <article className="panel"><div className="panel-head"><div><p>BUSIEST DAYS</p><h2>Your average sales by weekday</h2></div></div><WeekdayChart days={weekday} max={maxWeekday} currency={currency} /></article>
             <article className="panel span-2 insight-panel"><div className="insight-mark">AI</div><div><p>BUSINESS SNAPSHOT</p><h2>{topCategory ? `${topCategory[0]} brings in the most sales` : "Your sales data is ready"}</h2><p>{topCategory ? `${topCategory[0]} provides ${pct(topCategory[1] / Math.max(1, metrics.net))} of revenue. ${promotions.length ? `${promotions[0][0]} created the highest promotional discount value.` : "No promotion details are available for this view."} Open Sales Forecast to plan ahead.` : "Your main sales trends are ready. More views appear automatically when your file contains matching information."}</p></div><button onClick={() => setSection("forecast")}>Plan ahead →</button></article>
           </section>
         </>}
@@ -495,7 +560,7 @@ export default function Home() {
           <div className={`service-status is-${forecastServiceState}`} role="status"><strong>{forecastServiceState === "loading" ? "Improving your forecast" : forecastServiceState === "ready" ? "Forecast updated" : forecastServiceState === "setup" || forecastServiceState === "fallback" ? "Quick forecast active" : "Forecast ready"}</strong><span>{forecastServiceMessage || "The estimate with the smallest past difference is shown."}</span></div>
           <div className={`forecast-confidence ${forecast.confidence.toLowerCase().replace(" ", "-")}`} role="status"><strong>{cautiousForecast ? "Use with care" : "Useful for planning"}</strong><span>When tested on past sales, estimates typically differed by about {pct(forecast.winner.wape)}. {cautiousForecast ? "Plan using the shaded range, not only the centre number." : "Use this with what you know about upcoming promotions, holidays and stock changes."}</span></div>
           <section className="dashboard-grid forecast-grid">
-            <article className="panel span-2"><div className="panel-head"><div><p>WHAT MAY HAPPEN NEXT</p><h2>Past sales and expected future sales</h2></div><div className="two-legends"><span className="legend"><i />Past sales</span><span className="legend forecast"><i />Expected sales range</span></div></div><LineChart historical={dailyAll} forecast={forecast.points} mode="forecast" /></article>
+            <article className="panel span-2"><div className="panel-head"><div><p>WHAT MAY HAPPEN NEXT</p><h2>Past sales and expected future sales</h2></div><div className="two-legends"><span className="legend"><i />Past sales</span><span className="legend forecast"><i />Expected sales range</span></div></div><LineChart historical={dailyAll} forecast={forecast.points} mode="forecast" currency={currency} /></article>
             <article className="panel accuracy-card"><div className="panel-head"><div><p>HOW RELIABLE IS IT?</p><h2>How close past estimates were</h2></div></div><div className="accuracy-score"><strong>{pct(forecast.winner.wape)}</strong><span>Typical past difference · lower is better</span></div><dl><div><dt>Chosen approach</dt><dd>{friendlyModelName(forecast.winner.name)}</dd></div><div><dt>Typical daily difference</dt><dd>±{money.format(forecast.winner.mae)}</dd></div><div><dt>Usual direction</dt><dd>{pct(Math.abs(forecast.winner.bias))} {forecast.winner.bias >= 0 ? "below actual sales" : "above actual sales"}</dd></div><div><dt>Past checks completed</dt><dd>{forecast.folds} periods covering {forecast.evaluatedDays} days</dd></div></dl></article>
             <article className="panel"><div className="panel-head"><div><p>WHY THIS ESTIMATE?</p><h2>Past performance of each approach</h2></div></div><div className="model-compare">{comparedModels.map((model) => <div className={model.name === forecast.winner.name ? "winner" : ""} key={model.name}><span>{friendlyModelName(model.name)}</span><strong>{pct(model.wape)} difference</strong><i><b style={{ width: `${model.wape / maxComparedWape * 100}%` }} /></i></div>)}</div><small className="fine-print">Shorter bars performed better on past sales. RetailPulse automatically uses the best result for the period you selected.</small></article>
             {capabilities.category && <article className="panel span-2"><div className="panel-head"><div><p>PLAN BY CATEGORY</p><h2>Expected sales over the next {forecastDays} days</h2></div></div><div className="forecast-table"><div className="table-head"><span>Category</span><span>Expected sales</span><span>Expected items</span><span>Change</span></div>{categoryForecasts.map((c) => <div className="table-row" key={c.name}><strong>{c.name}</strong><span>{money.format(c.sales)}</span><span>{capabilities.quantity ? number.format(c.units) : "Not available"}</span><span className={c.change >= 0 ? "positive" : "negative"}>{c.change >= 0 ? "+" : ""}{pct(c.change)}</span></div>)}</div></article>}
