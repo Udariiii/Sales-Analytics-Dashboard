@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 import { addDays, buildForecast, minimumHistoryDays } from "../lib/forecast.ts";
+import { applyMapping, createImportPreview, parseDelimited, suggestMappings } from "../lib/sales-import.ts";
 
 const root = new URL("../", import.meta.url);
 
@@ -27,20 +28,25 @@ test("server-renders the RetailPulse authentication shell", async () => {
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/);
 });
 
-test("includes the CSV analytics and rolling predictive-analysis implementation", async () => {
-  const [page, forecastModule, layout, packageJson] = await Promise.all([
+test("includes flexible local-AI importing and rolling predictive analysis", async () => {
+  const [page, importer, aiMapper, forecastModule, layout, packageJson] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/sales-import.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/local-ai-mapper.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/forecast.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
   assert.doesNotMatch(page, /sri_lanka_supermarket_sales_2025\.csv/);
-  assert.match(page, /function parseCsv/);
-  assert.match(page, /function normalizeDate/);
-  assert.match(page, /detectSlashDateOrder/);
+  assert.match(page, /Confirm what your columns mean/);
+  assert.match(page, /Generate compatible dashboard/);
+  assert.match(page, /\.csv,\.tsv,\.txt,\.xlsx/);
+  assert.match(importer, /Map both Sale date and Net sales/);
+  assert.match(aiMapper, /all-MiniLM-L6-v2-ONNX/);
+  assert.match(aiMapper, /dtype: "q4"/);
+  assert.match(aiMapper, /Local AI \+ validation/);
   assert.match(page, /buildForecast\(dailyAll, forecastDays\)/);
   assert.match(page, /Upload complete/);
-  assert.match(page, /loaded successfully/);
   assert.match(page, /input\.value = ""/);
   assert.match(page, /ROLLING-BACKTESTED FORECAST/);
   assert.match(page, /Historical forecast error/);
@@ -51,6 +57,8 @@ test("includes the CSV analytics and rolling predictive-analysis implementation"
   assert.match(forecastModule, /folds\.length < 8/);
   assert.match(page, /WAPE/);
   assert.match(layout, /og\.png/);
+  assert.match(packageJson, /@huggingface\/transformers/);
+  assert.match(packageJson, /read-excel-file/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   await assert.rejects(access(new URL("../public/data/sri_lanka_supermarket_sales_2025.csv", import.meta.url)));
   await access(new URL("../public/og.png", import.meta.url));
@@ -59,6 +67,60 @@ test("includes the CSV analytics and rolling predictive-analysis implementation"
   await access(new URL("../proxy.ts", import.meta.url));
   await assert.rejects(access(new URL("../app/_sites-preview/SkeletonPreview.tsx", import.meta.url)));
   await access(root);
+});
+
+test("maps unfamiliar sales headers and enables only supported analytics", () => {
+  const data = [
+    ["Monthly export"],
+    ["Order Date", "Receipt No.", "Item Desc", "Dept", "Units Sold", "Final Amount", "Purchase Cost", "Tender Type"],
+    ["01/01/2025", "R-1", "Tea", "Grocery", "2", "1,500.00", "900", "Cash"],
+    ["02/01/2025", "R-2", "Milk", "Dairy", "1", "800.00", "500", "Card"],
+    ["bad date", "R-3", "Bread", "Bakery", "1", "600.00", "400", "Cash"],
+  ];
+  const preview = createImportPreview("different-format.xlsx", { sheet: "Sales", data });
+  assert.equal(preview.headerRow, 1);
+  const mappings = suggestMappings(preview.profiles);
+  const targets = new Set(mappings.map((mapping) => mapping.target));
+  assert.ok(targets.has("date"));
+  assert.ok(targets.has("netSales"));
+  assert.ok(targets.has("product"));
+  assert.ok(targets.has("category"));
+  const result = applyMapping(preview, mappings);
+  assert.equal(result.rows.length, 2);
+  assert.equal(result.report.invalidDates, 1);
+  assert.equal(result.report.capabilities.product, true);
+  assert.equal(result.report.capabilities.category, true);
+  assert.equal(result.report.capabilities.profit, true);
+  assert.equal(result.report.capabilities.promotion, false);
+  assert.equal(result.rows[0].net, 1500);
+  assert.equal(result.rows[0].profit, 600);
+});
+
+test("accepts semicolon-delimited minimal sales data", () => {
+  const data = parseDelimited("Business Date;Revenue\n2025-01-01;1200\n2025-01-02;1300");
+  const preview = createImportPreview("minimal.csv", { sheet: "Data", data });
+  const result = applyMapping(preview, suggestMappings(preview.profiles));
+  assert.equal(result.rows.length, 2);
+  assert.equal(result.report.capabilities.salesTrend, true);
+  assert.equal(result.report.capabilities.product, false);
+  assert.equal(result.report.capabilities.invoices, false);
+});
+
+test("distinguishes net from gross sales and rates from monetary amounts", () => {
+  const data = [
+    ["Date", "Gross Sales", "Discount Pct", "Discount Amount", "Net Sales", "Unit Cost", "Total Cost"],
+    ["2025-01-01", 1000, 10, 100, 900, 250, 500],
+    ["2025-01-02", 2000, 5, 100, 1900, 300, 900],
+  ];
+  const preview = createImportPreview("financial.csv", { sheet: "Data", data });
+  const mappings = suggestMappings(preview.profiles);
+  const byHeader = Object.fromEntries(mappings.filter((mapping) => mapping.target).map((mapping) => [preview.headers[mapping.sourceIndex], mapping.target]));
+  assert.equal(byHeader["Gross Sales"], "grossSales");
+  assert.equal(byHeader["Discount Pct"], "discountRate");
+  assert.equal(byHeader["Discount Amount"], "discount");
+  assert.equal(byHeader["Net Sales"], "netSales");
+  assert.equal(byHeader["Unit Cost"], "unitCost");
+  assert.equal(byHeader["Total Cost"], "cost");
 });
 
 test("forecasting uses horizon-specific rolling tests and honest confidence", () => {

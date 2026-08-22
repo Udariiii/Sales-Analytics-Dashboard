@@ -4,11 +4,13 @@ RetailPulse AI is a web-based sales analytics and predictive decision-support da
 
 ## Features
 
-- Requires each signed-in user to upload their own CSV; no sales data is bundled.
+- Requires each signed-in user to upload their own CSV, TSV or XLSX file; no sales data is bundled.
+- Uses a free quantized MiniLM model in the browser to interpret unfamiliar column names without a paid AI API.
+- Detects worksheets and header rows, profiles sample values, and asks the user to confirm uncertain mappings.
+- Requires only a sale date and net-sales field; other mapped fields dynamically unlock compatible analytics.
 - Email/password sign-up and sign-in, Google login, password recovery and protected sessions.
-- Processes uploaded transaction data locally in the browser without server-side file storage.
-- Historical KPIs, sales trends, category contribution, payment mix and weekday analysis.
-- Product and category rankings.
+- Processes uploaded sales rows locally without server-side file storage or AI-provider transmission.
+- Adapts historical KPIs, sales trends, profit, basket, category, payment, promotion and product panels to available evidence.
 - Seven-day and 30-day sales forecasts.
 - Horizon-specific rolling backtesting across up to eight unseen historical periods.
 - Five browser-based candidates: seasonal naive, recent and robust weekday averages, damped trend plus weekday, and calendar ridge regression.
@@ -72,5 +74,9 @@ npm run build:sites
 
 ## Data handling
 
-No sales dataset is included in the repository or deployment. CSV files are
-read and analysed in browser memory and are not persisted by the application.
+No sales dataset is included in the repository or deployment. CSV, TSV and
+XLSX rows are read and analysed in browser memory and are not persisted by the
+application. On first use, the browser downloads open-source model weights from
+Hugging Face for semantic column matching. The uploaded sales rows are not sent
+to that model host or any paid AI API. Deterministic type checks and explicit
+user confirmation remain authoritative for financial field mappings.
