@@ -12,7 +12,7 @@
     "build:sites": "vinext build",
     "test": "npm run build:sites && node --experimental-strip-types --test tests/rendered-html.test.mjs",
     "benchmark:forecast": "node --experimental-strip-types scripts/forecast-benchmark.mjs",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern .vinext --ignore-pattern .wrangler",
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern .vinext --ignore-pattern .wrangler --ignore-pattern .venv-forecast",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {

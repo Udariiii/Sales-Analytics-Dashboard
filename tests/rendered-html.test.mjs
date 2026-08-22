@@ -147,3 +147,29 @@ test("forecasting uses horizon-specific rolling tests and honest confidence", ()
   assert.equal(sevenDay.confidence, "High");
   assert.ok(sevenDay.points.every((point) => point.lower <= point.value && point.value <= point.upper));
 });
+test("integrates StatsForecast and DeepSeek without exposing raw rows or secrets", async () => {
+  const [page, service, remoteForecast, insightRoute, renderConfig, envExample] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../forecast_service/app.py", import.meta.url), "utf8"),
+    readFile(new URL("../lib/remote-forecast.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/ai/insights/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../render.yaml", import.meta.url), "utf8"),
+    readFile(new URL("../.env.example", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, />3 months</);
+  assert.match(page, />6 months</);
+  assert.match(page, /DEEPSEEK ANALYST/);
+  assert.match(page, /Not used/);
+  assert.doesNotMatch(page, /<span>Confidence<\/span>/);
+  assert.match(service, /AutoARIMA/);
+  assert.match(service, /AutoETS/);
+  assert.match(service, /DynamicOptimizedTheta/);
+  assert.match(service, /cross_validation/);
+  assert.match(remoteForecast, /daily\.map\(\(\{ date, sales \}\)/);
+  assert.match(insightRoute, /deepseek-v4-flash/);
+  assert.match(insightRoute, /DEEPSEEK_API_KEY/);
+  assert.doesNotMatch(insightRoute, /NEXT_PUBLIC_DEEPSEEK/);
+  assert.match(renderConfig, /rootDir: forecast_service/);
+  assert.match(envExample, /NEXT_PUBLIC_FORECAST_API_URL/);
+});

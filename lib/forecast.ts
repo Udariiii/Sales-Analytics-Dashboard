@@ -34,6 +34,8 @@ export type ForecastResult = {
   intervalCoverage: number;
   relativeImprovement: number;
   confidence: ConfidenceLevel;
+  engine?: "StatsForecast" | "Browser fallback";
+  historyDays?: number;
 };
 
 type ForecastModel = {
@@ -242,5 +244,7 @@ export function buildForecast(daily: DailyPoint[], horizon: number): ForecastRes
     intervalCoverage,
     relativeImprovement: baseline.wape ? (baseline.wape - winner.wape) / baseline.wape : 0,
     confidence: confidenceFor(winner.wape, folds.length),
+    engine: "Browser fallback",
+    historyDays: daily.length,
   };
 }

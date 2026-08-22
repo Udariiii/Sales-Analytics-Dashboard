@@ -6,16 +6,17 @@ RetailPulse AI is a web-based sales analytics and predictive decision-support da
 
 - Requires each signed-in user to upload their own CSV, TSV or XLSX file; no sales data is bundled.
 - Uses a free quantized MiniLM model in the browser to interpret unfamiliar column names without a paid AI API.
-- Detects worksheets and header rows, profiles sample values, and asks the user to confirm uncertain mappings.
+- Detects worksheets and header rows, profiles sample values, and asks only for mappings that genuinely need review.
 - Requires only a sale date and net-sales field; other mapped fields dynamically unlock compatible analytics.
 - Email/password sign-up and sign-in, Google login, password recovery and protected sessions.
-- Processes uploaded sales rows locally without server-side file storage or AI-provider transmission.
+- Processes raw uploaded rows locally without server-side file storage.
 - Adapts historical KPIs, sales trends, profit, basket, category, payment, promotion and product panels to available evidence.
-- Seven-day and 30-day sales forecasts.
-- Horizon-specific rolling backtesting across up to eight unseen historical periods.
-- Five browser-based candidates: seasonal naive, recent and robust weekday averages, damped trend plus weekday, and calendar ridge regression.
-- Honest WAPE, MAE, bias, confidence labels and empirical 80% historical-error ranges instead of a synthetic "accuracy" percentage.
-- Horizon-reconciled category demand outlook and confidence-gated decision brief.
+- Seven-day, 30-day, three-month and six-month revenue forecasts.
+- A Render-hosted StatsForecast service with AutoETS, AutoARIMA, AutoTheta, dynamic Theta and seasonal-naive candidates.
+- Five fast local candidates are retained and compared with StatsForecast; the lowest rolling historical error wins for each horizon.
+- Honest WAPE, MAE, bias and empirical 80% historical-error ranges instead of a synthetic "accuracy" percentage.
+- Optional DeepSeek V4 Flash analysis of compact verified metrics, with no raw spreadsheet rows sent to DeepSeek.
+- Horizon-reconciled category demand outlook and evidence-based decision brief.
 - Responsive desktop, tablet and mobile layouts.
 
 ## Run locally
@@ -51,20 +52,32 @@ provider in Supabase before inviting real users.
 npm test
 ```
 
-When the local research CSV is present (it remains ignored and is never bundled), reproduce the forecast benchmark with:
+When a local research CSV is present (it remains ignored and is never bundled), reproduce both forecast benchmarks with:
 
 ```bash
-npm run benchmark:forecast
+npm run benchmark:forecast -- "C:\path\to\sales.csv"
+.venv-forecast\Scripts\python.exe forecast_service\benchmark.py "C:\path\to\sales.csv"
 ```
+
+The benchmarks must be run on the same file before comparing model error.
 
 ## Deployment
 
-The production application uses Supabase Auth as its managed backend and does
-not require a separate Render service. Deploy the GitHub repository to Vercel
-with the Next.js preset and add `NEXT_PUBLIC_SUPABASE_URL` and
-`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` to the Production and Preview
-environments. Vercel will run `npm run build` automatically. Node.js 22 is
-declared in `package.json`.
+Deploy the repository's `render.yaml` as a Render Blueprint. After Render
+creates the `retailpulse-forecast` web service, copy its public URL.
+
+In Vercel, add these Production and Preview variables:
+
+```text
+NEXT_PUBLIC_SUPABASE_URL=...
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=...
+NEXT_PUBLIC_FORECAST_API_URL=https://your-service.onrender.com
+DEEPSEEK_API_KEY=...
+DEEPSEEK_MODEL=deepseek-v4-flash
+```
+
+Redeploy Vercel after saving the variables. Keep `DEEPSEEK_API_KEY` server-side;
+never rename it with a `NEXT_PUBLIC_` prefix. Node.js 22 is declared in `package.json`.
 
 The legacy Sites/Cloudflare-compatible build remains available through:
 
@@ -77,6 +90,8 @@ npm run build:sites
 No sales dataset is included in the repository or deployment. CSV, TSV and
 XLSX rows are read and analysed in browser memory and are not persisted by the
 application. On first use, the browser downloads open-source model weights from
-Hugging Face for semantic column matching. The uploaded sales rows are not sent
-to that model host or any paid AI API. Deterministic type checks and explicit
-user confirmation remain authoritative for financial field mappings.
+Hugging Face for semantic column matching. Raw sales rows are not sent to that
+model host. Daily date-and-sales totals are sent to the configured Render
+forecasting service. DeepSeek receives only compact verified metrics after the
+user explicitly requests an AI analysis. Deterministic validation remains
+authoritative for financial mappings and calculations.

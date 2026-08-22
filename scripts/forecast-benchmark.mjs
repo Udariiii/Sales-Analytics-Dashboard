@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { buildForecast } from "../lib/forecast.ts";
 
-const source = new URL("../sri_lanka_supermarket_sales_2025.csv", import.meta.url);
+const source = process.argv[2] || new URL("../sri_lanka_supermarket_sales_2025.csv", import.meta.url);
 const text = await readFile(source, "utf8");
 const rows = text.trim().split(/\r?\n/);
 const headers = rows[0].split(",");
@@ -29,7 +29,7 @@ for (let date = dates[0]; date <= dates.at(-1); date = addDays(date, 1)) {
 }
 
 console.log(JSON.stringify({
-  source: source.pathname,
+  source: String(source),
   transactionLines: rows.length - 1,
   calendarDays: daily.length,
   startDate: daily[0].date,
@@ -39,7 +39,7 @@ console.log(JSON.stringify({
   maximumDailySales: Math.max(...daily.map((point) => point.sales)),
 }, null, 2));
 
-for (const horizon of [7, 30]) {
+for (const horizon of [7, 30, 90, 180]) {
   const result = buildForecast(daily, horizon);
   if (!result) throw new Error(`Insufficient data for the ${horizon}-day benchmark.`);
   console.log(`\n${horizon}-DAY ROLLING BACKTEST (${result.folds} folds / ${result.evaluatedDays} evaluated days)`);

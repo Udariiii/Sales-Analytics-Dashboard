@@ -42,6 +42,7 @@ yarn-error.log*
 /.npm-cache/
 /.devserver*.log
 /.devserver.pid
+/.venv-forecast/
 
 # Local research source files retained beside the app but not deployed.
 /BScBIS_CIS6000_20275032.pdf
