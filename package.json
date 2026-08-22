@@ -10,7 +10,8 @@
     "build": "next build",
     "start": "next start",
     "build:sites": "vinext build",
-    "test": "npm run build:sites && node --test tests/rendered-html.test.mjs",
+    "test": "npm run build:sites && node --experimental-strip-types --test tests/rendered-html.test.mjs",
+    "benchmark:forecast": "node --experimental-strip-types scripts/forecast-benchmark.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern .vinext --ignore-pattern .wrangler",
     "db:generate": "drizzle-kit generate"
   },

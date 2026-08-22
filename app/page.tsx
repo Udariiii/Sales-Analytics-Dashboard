@@ -2,6 +2,7 @@
 
 import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AccountMenu } from "@/components/account-menu";
+import { addDays, buildForecast, DailyPoint, ForecastPoint, minimumHistoryDays } from "@/lib/forecast";
 
 type SalesRow = {
   date: string;
@@ -16,28 +17,6 @@ type SalesRow = {
   profit: number;
   payment: string;
   promotion: string;
-};
-
-type DailyPoint = {
-  date: string;
-  sales: number;
-  profit: number;
-  units: number;
-  invoices: number;
-};
-
-type ForecastPoint = {
-  date: string;
-  value: number;
-  lower: number;
-  upper: number;
-};
-
-type ModelResult = {
-  name: string;
-  wape: number;
-  mae: number;
-  predictions: number[];
 };
 
 const money = new Intl.NumberFormat("en-LK", { style: "currency", currency: "LKR", maximumFractionDigits: 0 });
@@ -115,12 +94,6 @@ function toRows(text: string): SalesRow[] {
   return rows;
 }
 
-function addDays(date: string, days: number) {
-  const d = new Date(`${date}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-
 function aggregateDaily(rows: SalesRow[]): DailyPoint[] {
   const map = new Map<string, { sales: number; profit: number; units: number; invoices: Set<string> }>();
   rows.forEach((r) => {
@@ -135,59 +108,6 @@ function aggregateDaily(rows: SalesRow[]): DailyPoint[] {
     output.push({ date, sales: x?.sales || 0, profit: x?.profit || 0, units: x?.units || 0, invoices: x?.invoices.size || 0 });
   }
   return output;
-}
-
-function seasonalNaive(history: DailyPoint[], horizon: number): number[] {
-  const values = history.map((d) => d.sales);
-  const out: number[] = [];
-  for (let i = 0; i < horizon; i++) out.push(Math.max(0, i < 7 ? values[values.length - 7 + i] : out[i - 7]));
-  return out;
-}
-
-function statisticalForecast(history: DailyPoint[], horizon: number): number[] {
-  const recent = history.slice(-84);
-  const last28 = history.slice(-28);
-  const prev28 = history.slice(-56, -28);
-  const recentMean = last28.reduce((a, b) => a + b.sales, 0) / Math.max(1, last28.length);
-  const previousMean = prev28.reduce((a, b) => a + b.sales, 0) / Math.max(1, prev28.length);
-  const growth = Math.max(-0.12, Math.min(0.12, previousMean ? recentMean / previousMean - 1 : 0));
-  const dowSum = Array(7).fill(0), dowCount = Array(7).fill(0);
-  recent.forEach((d) => { const day = new Date(`${d.date}T00:00:00Z`).getUTCDay(); dowSum[day] += d.sales; dowCount[day]++; });
-  const overall = recent.reduce((a, b) => a + b.sales, 0) / Math.max(1, recent.length);
-  const dowFactor = dowSum.map((v, i) => dowCount[i] ? (v / dowCount[i]) / overall : 1);
-  const monthSum = Array(12).fill(0), monthCount = Array(12).fill(0);
-  history.forEach((d) => { const m = Number(d.date.slice(5, 7)) - 1; monthSum[m] += d.sales; monthCount[m]++; });
-  const allMean = history.reduce((a, b) => a + b.sales, 0) / Math.max(1, history.length);
-  const monthFactor = monthSum.map((v, i) => monthCount[i] >= 14 ? Math.max(0.75, Math.min(1.35, (v / monthCount[i]) / allMean)) : 1);
-  const currentMonth = Number(history.at(-1)!.date.slice(5, 7)) - 1;
-  return Array.from({ length: horizon }, (_, i) => {
-    const date = addDays(history.at(-1)!.date, i + 1);
-    const dow = new Date(`${date}T00:00:00Z`).getUTCDay();
-    const month = Number(date.slice(5, 7)) - 1;
-    const monthAdjustment = monthFactor[month] / Math.max(0.75, monthFactor[currentMonth]);
-    const dampedTrend = 1 + growth * (1 - Math.exp(-(i + 1) / 21));
-    return Math.max(0, recentMean * dowFactor[dow] * monthAdjustment * dampedTrend);
-  });
-}
-
-function score(actual: number[], predicted: number[], name: string): ModelResult {
-  const abs = actual.map((v, i) => Math.abs(v - predicted[i]));
-  const mae = abs.reduce((a, b) => a + b, 0) / Math.max(1, abs.length);
-  const wape = abs.reduce((a, b) => a + b, 0) / Math.max(1, actual.reduce((a, b) => a + b, 0));
-  return { name, wape, mae, predictions: predicted };
-}
-
-function buildForecast(daily: DailyPoint[], horizon: number) {
-  const testSize = Math.min(30, Math.max(7, Math.floor(daily.length * 0.15)));
-  const train = daily.slice(0, -testSize);
-  const actual = daily.slice(-testSize).map((d) => d.sales);
-  const baseline = score(actual, seasonalNaive(train, testSize), "Seasonal naive");
-  const statistical = score(actual, statisticalForecast(train, testSize), "Trend + weekday model");
-  const winner = baseline.wape <= statistical.wape ? baseline : statistical;
-  const values = winner.name === "Seasonal naive" ? seasonalNaive(daily, horizon) : statisticalForecast(daily, horizon);
-  const errorBand = Math.max(winner.mae * 1.64, values.reduce((a, b) => a + b, 0) / Math.max(1, values.length) * 0.08);
-  const points = values.map((value, i) => ({ date: addDays(daily.at(-1)!.date, i + 1), value, lower: Math.max(0, value - errorBand), upper: value + errorBand }));
-  return { winner, baseline, statistical, points, testSize };
 }
 
 function sumBy(rows: SalesRow[], key: keyof SalesRow, value: keyof SalesRow) {
@@ -301,7 +221,7 @@ export default function Home() {
 
   const dailyAll = useMemo(() => aggregateDaily(rows), [rows]);
   const dailyFiltered = useMemo(() => aggregateDaily(filtered), [filtered]);
-  const forecast = useMemo(() => dailyAll.length > 60 ? buildForecast(dailyAll, forecastDays) : null, [dailyAll, forecastDays]);
+  const forecast = useMemo(() => buildForecast(dailyAll, forecastDays), [dailyAll, forecastDays]);
   const categorySales = useMemo(() => sumBy(filtered, "category", "net"), [filtered]);
   const productSales = useMemo(() => sumBy(filtered, "product", "net").slice(0, 10), [filtered]);
   const payments = useMemo(() => sumBy(filtered, "payment", "net"), [filtered]);
@@ -319,22 +239,47 @@ export default function Home() {
     return names.map((name, i) => ({ name, value: counts[i] ? sums[i] / counts[i] : 0 }));
   }, [dailyFiltered]);
 
+  const dataProfile = useMemo(() => {
+    const sales = dailyAll.map((point) => point.sales).sort((a, b) => a - b);
+    const quartile = (probability: number) => {
+      if (!sales.length) return 0;
+      const index = (sales.length - 1) * probability;
+      const lower = Math.floor(index), fraction = index - lower;
+      return sales[lower] + (sales[lower + 1] - sales[lower] || 0) * fraction;
+    };
+    const q1 = quartile(0.25), q3 = quartile(0.75), upperFence = q3 + 1.5 * (q3 - q1);
+    return {
+      historyDays: dailyAll.length,
+      zeroDays: dailyAll.filter((point) => point.sales === 0).length,
+      unusualDays: dailyAll.filter((point) => point.sales > upperFence).length,
+    };
+  }, [dailyAll]);
+
+  const futureTotal = forecast?.points.reduce((a, b) => a + b.value, 0) || 0;
+
   const categoryForecasts = useMemo(() => {
     if (!forecast || !rows.length) return [];
     const latest = dailyAll.at(-1)!.date, previousStart = addDays(latest, -59), recentStart = addDays(latest, -29);
-    return categories.slice(1).map((name) => {
+    const estimates = categories.slice(1).map((name) => {
       const recentRows = rows.filter((r) => r.category === name && r.date >= recentStart);
       const previousRows = rows.filter((r) => r.category === name && r.date >= previousStart && r.date < recentStart);
       const recentSales = recentRows.reduce((a, r) => a + r.net, 0), previousSales = previousRows.reduce((a, r) => a + r.net, 0);
       const recentUnits = recentRows.reduce((a, r) => a + r.quantity, 0);
-      const momentum = previousSales ? Math.max(0.82, Math.min(1.18, recentSales / previousSales)) : 1;
-      return { name, sales: recentSales * (0.7 + 0.3 * momentum), units: recentUnits * (0.7 + 0.3 * momentum), change: momentum - 1 };
+      const momentum = previousSales ? Math.max(0.85, Math.min(1.15, recentSales / previousSales)) : 1;
+      return { name, weight: recentSales * (0.85 + 0.15 * momentum), unitsPerLkr: recentSales ? recentUnits / recentSales : 0, change: momentum - 1 };
+    });
+    const totalWeight = estimates.reduce((sum, estimate) => sum + estimate.weight, 0) || 1;
+    return estimates.map((estimate) => {
+      const sales = futureTotal * estimate.weight / totalWeight;
+      return { name: estimate.name, sales, units: sales * estimate.unitsPerLkr, change: estimate.change };
     }).sort((a, b) => b.sales - a.sales).slice(0, 6);
-  }, [forecast, rows, dailyAll, categories]);
+  }, [forecast, rows, dailyAll, categories, futureTotal]);
 
-  const futureTotal = forecast?.points.reduce((a, b) => a + b.value, 0) || 0;
   const previousComparable = dailyAll.slice(-forecastDays).reduce((a, b) => a + b.sales, 0);
   const forecastChange = previousComparable ? futureTotal / previousComparable - 1 : 0;
+  const comparedModels = forecast ? [...forecast.models.slice(0, 3), ...(forecast.models.slice(0, 3).some((model) => model.name === "Seasonal naive") ? [] : [forecast.baseline])] : [];
+  const maxComparedWape = Math.max(...comparedModels.map((model) => model.wape), 0.01);
+  const cautiousForecast = forecast?.confidence === "Low" || forecast?.confidence === "Very low";
   const topGrowth = [...categoryForecasts].sort((a, b) => b.change - a.change)[0];
   const topCategory = categorySales[0];
   const maxCategory = categorySales[0]?.[1] || 1;
@@ -435,17 +380,21 @@ export default function Home() {
           </section>
         </>}
 
+        {section === "forecast" && !forecast && <section className="panel forecast-unavailable"><p className="eyebrow">INSUFFICIENT HISTORY</p><h2>More daily sales history is needed</h2><p>The {forecastDays}-day forecast requires at least {minimumHistoryDays(forecastDays)} calendar days so models can be tested on unseen periods. This file currently provides {dailyAll.length} days.</p></section>}
+
         {section === "forecast" && forecast && <>
           <section className="forecast-hero">
-            <div><p className="eyebrow">MODEL-SELECTED FORECAST</p><h2>{forecastDays}-day sales outlook</h2><div className="forecast-value"><strong>{money.format(futureTotal)}</strong><span className={forecastChange >= 0 ? "positive-pill" : "negative-pill"}>{forecastChange >= 0 ? "+" : ""}{pct(forecastChange)} vs previous {forecastDays} days</span></div><p>Forecast generated from daily sales history, weekday patterns, recent momentum and seasonal adjustment.</p></div>
+            <div><p className="eyebrow">ROLLING-BACKTESTED FORECAST</p><h2>{forecastDays}-day sales outlook</h2><div className="forecast-value"><strong>{money.format(futureTotal)}</strong><span className={forecastChange >= 0 ? "positive-pill" : "negative-pill"}>{forecastChange >= 0 ? "+" : ""}{pct(forecastChange)} vs previous {forecastDays} days</span></div><p>{forecast.winner.name} was selected from five candidates across {forecast.folds} unseen historical periods. Daily ranges reflect the model&apos;s historical absolute errors.</p></div>
             <div className="horizon-toggle" aria-label="Forecast horizon"><button className={forecastDays === 7 ? "active" : ""} onClick={() => setForecastDays(7)}>7 days</button><button className={forecastDays === 30 ? "active" : ""} onClick={() => setForecastDays(30)}>30 days</button></div>
           </section>
+          <div className={`forecast-confidence ${forecast.confidence.toLowerCase().replace(" ", "-")}`} role="status"><strong>{forecast.confidence} confidence</strong><span>Rolling historical error is {pct(forecast.winner.wape)}. {cautiousForecast ? "Use this as a planning range, not an automatic purchasing instruction." : "The forecast is useful for planning when combined with current business information."}</span></div>
           <section className="dashboard-grid forecast-grid">
-            <article className="panel span-2"><div className="panel-head"><div><p>FORWARD VIEW</p><h2>Actual and predicted sales</h2></div><div className="two-legends"><span className="legend"><i />Actual</span><span className="legend forecast"><i />Forecast + interval</span></div></div><LineChart historical={dailyAll} forecast={forecast.points} mode="forecast" /></article>
-            <article className="panel accuracy-card"><div className="panel-head"><div><p>BACKTEST RESULT</p><h2>Model accuracy</h2></div></div><div className="accuracy-score"><strong>{pct(1 - forecast.winner.wape)}</strong><span>forecast accuracy</span></div><dl><div><dt>Selected model</dt><dd>{forecast.winner.name}</dd></div><div><dt>WAPE</dt><dd>{pct(forecast.winner.wape)}</dd></div><div><dt>Mean absolute error</dt><dd>{money.format(forecast.winner.mae)}</dd></div><div><dt>Evaluation window</dt><dd>Last {forecast.testSize} days</dd></div></dl></article>
-            <article className="panel"><div className="panel-head"><div><p>MODEL COMPARISON</p><h2>Evidence over assumption</h2></div></div><div className="model-compare"><div><span>Seasonal naive</span><strong>{pct(forecast.baseline.wape)} WAPE</strong><i><b style={{ width: `${Math.min(100, forecast.baseline.wape * 300)}%` }} /></i></div><div className={forecast.winner.name !== "Seasonal naive" ? "winner" : ""}><span>Trend + weekday</span><strong>{pct(forecast.statistical.wape)} WAPE</strong><i><b style={{ width: `${Math.min(100, forecast.statistical.wape * 300)}%` }} /></i></div></div><small className="fine-print">Lower WAPE is better. The selected model is determined using unseen historical days.</small></article>
-            <article className="panel span-2"><div className="panel-head"><div><p>CATEGORY OUTLOOK</p><h2>Expected demand over the next 30 days</h2></div></div><div className="forecast-table"><div className="table-head"><span>Category</span><span>Forecast sales</span><span>Expected units</span><span>Momentum</span></div>{categoryForecasts.map((c) => <div className="table-row" key={c.name}><strong>{c.name}</strong><span>{money.format(c.sales)}</span><span>{number.format(c.units)}</span><span className={c.change >= 0 ? "positive" : "negative"}>{c.change >= 0 ? "+" : ""}{pct(c.change)}</span></div>)}</div></article>
-            <article className="panel executive-card"><div className="executive-label"><span>AI</span>EXECUTIVE SUMMARY</div><h2>{forecastChange >= 0 ? "Sales momentum is expected to strengthen" : "A softer trading period is expected"}</h2><p>The selected {forecast.winner.name.toLowerCase()} forecasts {money.format(futureTotal)} over the next {forecastDays} days, a {Math.abs(forecastChange * 100).toFixed(1)}% {forecastChange >= 0 ? "increase" : "decrease"} from the previous comparable period.</p><p>{topGrowth ? `${topGrowth.name} has the strongest recent category momentum at ${topGrowth.change >= 0 ? "+" : ""}${pct(topGrowth.change)}. Review stock coverage and planned promotions for this category.` : "Category momentum will appear when sufficient records are available."}</p><div className="summary-action"><strong>Recommended action</strong><span>Review high-demand stock, confirm supplier lead times, and monitor forecast error weekly.</span></div></article>
+            <article className="panel span-2"><div className="panel-head"><div><p>FORWARD VIEW</p><h2>Actual and predicted sales</h2></div><div className="two-legends"><span className="legend"><i />Actual</span><span className="legend forecast"><i />Forecast + 80% historical-error range</span></div></div><LineChart historical={dailyAll} forecast={forecast.points} mode="forecast" /></article>
+            <article className="panel accuracy-card"><div className="panel-head"><div><p>ROLLING BACKTEST</p><h2>Historical forecast error</h2></div></div><div className="accuracy-score"><strong>{pct(forecast.winner.wape)}</strong><span>WAPE · lower is better</span></div><dl><div><dt>Confidence</dt><dd>{forecast.confidence}</dd></div><div><dt>Selected model</dt><dd>{forecast.winner.name}</dd></div><div><dt>Typical daily error</dt><dd>±{money.format(forecast.winner.mae)}</dd></div><div><dt>Forecast bias</dt><dd>{pct(Math.abs(forecast.winner.bias))} {forecast.winner.bias >= 0 ? "under" : "over"}</dd></div><div><dt>Validation coverage</dt><dd>{forecast.folds} tests · {forecast.evaluatedDays} days</dd></div></dl></article>
+            <article className="panel"><div className="panel-head"><div><p>MODEL COMPARISON</p><h2>Rolling historical error</h2></div></div><div className="model-compare">{comparedModels.map((model) => <div className={model.name === forecast.winner.name ? "winner" : ""} key={model.name}><span>{model.name}</span><strong>{pct(model.wape)} WAPE</strong><i><b style={{ width: `${model.wape / maxComparedWape * 100}%` }} /></i></div>)}</div><small className="fine-print">Longer bars mean more error. The selected model has the lowest combined WAPE across unseen periods and improves on the weekly baseline by {pct(forecast.relativeImprovement)}.</small></article>
+            <article className="panel span-2"><div className="panel-head"><div><p>CATEGORY OUTLOOK</p><h2>Expected demand over the next {forecastDays} days</h2></div></div><div className="forecast-table"><div className="table-head"><span>Category</span><span>Forecast sales</span><span>Expected units</span><span>Momentum</span></div>{categoryForecasts.map((c) => <div className="table-row" key={c.name}><strong>{c.name}</strong><span>{money.format(c.sales)}</span><span>{number.format(c.units)}</span><span className={c.change >= 0 ? "positive" : "negative"}>{c.change >= 0 ? "+" : ""}{pct(c.change)}</span></div>)}</div></article>
+            <article className="panel executive-card"><div className="executive-label"><span>AI</span>DECISION BRIEF</div><h2>{cautiousForecast ? "Low-confidence outlook — use a planning range" : forecastChange >= 0 ? "Sales momentum may strengthen" : "A softer trading period may follow"}</h2><p>The selected {forecast.winner.name.toLowerCase()} estimates {money.format(futureTotal)} over the next {forecastDays} days, a {Math.abs(forecastChange * 100).toFixed(1)}% {forecastChange >= 0 ? "increase" : "decrease"} from the previous comparable period. Historical rolling error is {pct(forecast.winner.wape)}.</p><p>{topGrowth ? `${topGrowth.name} has the strongest recent category momentum at ${topGrowth.change >= 0 ? "+" : ""}${pct(topGrowth.change)}. This category allocation is reconciled to the total forecast.` : "Category momentum will appear when sufficient records are available."}</p><div className="summary-action"><strong>{cautiousForecast ? "Required manager check" : "Recommended action"}</strong><span>{cautiousForecast ? "Do not change purchase quantities from the point estimate alone. Compare the chart range with current stock, promotions and supplier lead times." : "Review high-demand stock, confirm supplier lead times, and monitor forecast error weekly."}</span></div></article>
+            <article className="panel span-3 data-readiness"><div className="panel-head"><div><p>DATA READINESS</p><h2>What the model had available</h2></div></div><div><span><strong>{dataProfile.historyDays}</strong>calendar days</span><span><strong>{dataProfile.zeroDays}</strong>zero or missing-date days</span><span><strong>{dataProfile.unusualDays}</strong>IQR-flagged high-sales days</span><span><strong>{pct(forecast.intervalCoverage)}</strong>historical range coverage</span></div></article>
           </section>
         </>}
 
@@ -457,8 +406,8 @@ export default function Home() {
 
         {section === "methodology" && <section className="methodology">
           <div className="method-intro"><p className="eyebrow">TRANSPARENT PREDICTIVE ANALYTICS</p><h2>Forecasts that can be explained and evaluated</h2><p>The dashboard separates descriptive reporting from genuine forward-looking analysis. Predictions are calculated from historical transactions; the executive summary only explains those calculated results.</p></div>
-          <div className="method-flow"><article><span>1</span><div><h3>Prepare</h3><p>Validate the CSV and aggregate transaction lines into daily sales, profit, units and invoice counts.</p></div></article><article><span>2</span><div><h3>Engineer features</h3><p>Measure weekly seasonality, weekday behaviour, recent momentum and calendar-month effects.</p></div></article><article><span>3</span><div><h3>Backtest</h3><p>Reserve the final historical days as unseen test data. Random train/test splitting is deliberately avoided.</p></div></article><article><span>4</span><div><h3>Select</h3><p>Compare a seasonal baseline with a trend-and-weekday statistical model using WAPE and MAE.</p></div></article><article><span>5</span><div><h3>Forecast</h3><p>Retrain on the complete history, predict 7 or 30 days, and display a model-error-based interval.</p></div></article></div>
-          <div className="method-cards"><article><p>PRIMARY METRIC</p><strong>WAPE</strong><span>Weighted absolute percentage error provides a stable accuracy measure for retail revenue.</span></article><article><p>CONTROL MODEL</p><strong>Seasonal naive</strong><span>A credible predictive model should improve on simply repeating last week.</span></article><article><p>RESPONSIBLE LIMIT</p><strong>One year</strong><span>Category and top-product forecasts are more defensible than sparse forecasts for every SKU.</span></article></div>
+          <div className="method-flow"><article><span>1</span><div><h3>Prepare</h3><p>Validate the CSV, fill the calendar to daily grain, and surface zero or missing-date days and unusual sales values.</p></div></article><article><span>2</span><div><h3>Build candidates</h3><p>Fit weekly baseline, recent-weekday, robust-weekday, damped-trend and calendar-ridge candidates using only information available before each forecast date.</p></div></article><article><span>3</span><div><h3>Run rolling backtests</h3><p>Test the requested 7-day or 30-day horizon across up to eight chronological unseen periods. Random splitting and future-data leakage are avoided.</p></div></article><article><span>4</span><div><h3>Select and qualify</h3><p>Select the lowest-WAPE candidate for that horizon, report MAE and bias, and assign confidence from observed error rather than displaying a misleading accuracy percentage.</p></div></article><article><span>5</span><div><h3>Forecast responsibly</h3><p>Retrain the winner on complete history and use empirical historical errors for the displayed 80% range. Low-confidence recommendations require manager review.</p></div></article></div>
+          <div className="method-cards"><article><p>PRIMARY METRIC</p><strong>WAPE</strong><span>Total absolute forecast error divided by actual sales. Lower is better; it is not converted into an “accuracy” claim.</span></article><article><p>CONTROL MODEL</p><strong>Seasonal naive</strong><span>A candidate must demonstrate value against simply repeating the most recent week.</span></article><article><p>VALIDATION DESIGN</p><strong>Up to 8 folds</strong><span>Each horizon is evaluated separately across chronological historical periods before a model is selected.</span></article></div>
           <div className="disclosure"><strong>Data-use disclosure</strong><p>RetailPulse does not include a sales dataset. Users must upload their own CSV, which is processed locally in the browser and is not retained by the application.</p></div>
         </section>}
         <footer><span>RetailPulse AI · CIS 6000 Research Prototype</span><span>Predictions support decisions; they do not replace managerial judgement.</span></footer>

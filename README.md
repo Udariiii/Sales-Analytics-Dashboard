@@ -10,10 +10,10 @@ RetailPulse AI is a web-based sales analytics and predictive decision-support da
 - Historical KPIs, sales trends, category contribution, payment mix and weekday analysis.
 - Product and category rankings.
 - Seven-day and 30-day sales forecasts.
-- Chronological backtesting against unseen historical days.
-- Seasonal-naive and trend-plus-weekday model comparison.
-- WAPE, MAE and model-error-based forecast intervals.
-- Category demand outlook and calculation-grounded executive summary.
+- Horizon-specific rolling backtesting across up to eight unseen historical periods.
+- Five browser-based candidates: seasonal naive, recent and robust weekday averages, damped trend plus weekday, and calendar ridge regression.
+- Honest WAPE, MAE, bias, confidence labels and empirical 80% historical-error ranges instead of a synthetic "accuracy" percentage.
+- Horizon-reconciled category demand outlook and confidence-gated decision brief.
 - Responsive desktop, tablet and mobile layouts.
 
 ## Run locally
@@ -47,6 +47,12 @@ provider in Supabase before inviting real users.
 
 ```bash
 npm test
+```
+
+When the local research CSV is present (it remains ignored and is never bundled), reproduce the forecast benchmark with:
+
+```bash
+npm run benchmark:forecast
 ```
 
 ## Deployment
