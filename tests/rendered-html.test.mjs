@@ -38,8 +38,10 @@ test("includes flexible local-AI importing and rolling predictive analysis", asy
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
   assert.doesNotMatch(page, /sri_lanka_supermarket_sales_2025\.csv/);
-  assert.match(page, /Confirm what your columns mean/);
-  assert.match(page, /Generate compatible dashboard/);
+  assert.doesNotMatch(page, /Confirm what your columns mean/);
+  assert.doesNotMatch(page, /Generate compatible dashboard/);
+  assert.match(page, /Understanding your sales columns/);
+  assert.match(page, /applyMapping\(preview, mappings\)/);
   assert.match(page, /\.csv,\.tsv,\.txt,\.xlsx/);
   assert.match(importer, /Map both Sale date and Net sales/);
   assert.match(aiMapper, /all-MiniLM-L6-v2-ONNX/);
@@ -48,8 +50,8 @@ test("includes flexible local-AI importing and rolling predictive analysis", asy
   assert.match(page, /buildForecast\(dailyAll, forecastDays\)/);
   assert.match(page, /Upload complete/);
   assert.match(page, /input\.value = ""/);
-  assert.match(page, /ROLLING-BACKTESTED FORECAST/);
-  assert.match(page, /Historical forecast error/);
+  assert.match(page, /YOUR SALES FORECAST/);
+  assert.match(page, /How close past estimates were/);
   assert.doesNotMatch(page, /forecast accuracy|Model accuracy/i);
   assert.match(forecastModule, /Seasonal naive/);
   assert.match(forecastModule, /Calendar ridge/);
@@ -159,14 +161,16 @@ test("integrates StatsForecast and DeepSeek without exposing raw rows or secrets
 
   assert.match(page, />3 months</);
   assert.match(page, />6 months</);
-  assert.match(page, /DEEPSEEK ANALYST/);
-  assert.match(page, /Not used/);
+  assert.match(page, /AI BUSINESS ADVISER/);
+  assert.match(page, /Explain this forecast/);
   assert.doesNotMatch(page, /<span>Confidence<\/span>/);
   assert.match(service, /AutoARIMA/);
   assert.match(service, /AutoETS/);
   assert.match(service, /DynamicOptimizedTheta/);
   assert.match(service, /cross_validation/);
   assert.match(remoteForecast, /daily\.map\(\(\{ date, sales \}\)/);
+  assert.match(remoteForecast, /75_000/);
+  assert.doesNotMatch(page, /className="loading"/);
   assert.match(insightRoute, /deepseek-v4-flash/);
   assert.match(insightRoute, /DEEPSEEK_API_KEY/);
   assert.doesNotMatch(insightRoute, /NEXT_PUBLIC_DEEPSEEK/);

@@ -1,12 +1,12 @@
 "use client";
 
-import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { AccountMenu } from "@/components/account-menu";
 import { addDays, buildForecast, DailyPoint, ForecastPoint, ForecastResult, minimumHistoryDays } from "@/lib/forecast";
 import { readSalesFile } from "@/lib/file-reader";
 import { requestStatsForecast } from "@/lib/remote-forecast";
 import { mapColumnsWithLocalAI } from "@/lib/local-ai-mapper";
-import { AnalyticsCapabilities, applyMapping, CANONICAL_FIELDS, CanonicalField, confidenceLabel, createImportPreview, FIELD_DEFINITIONS, ImportPreview, ImportReport, MappingChoice, RawSheet, SalesRow as FlexibleSalesRow, suggestMappings } from "@/lib/sales-import";
+import { AnalyticsCapabilities, applyMapping, createImportPreview, ImportReport, RawSheet, SalesRow as FlexibleSalesRow, suggestMappings } from "@/lib/sales-import";
 
 const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
 const number = new Intl.NumberFormat("en-LK", { maximumFractionDigits: 0 });
@@ -35,6 +35,28 @@ function sumBy(rows: FlexibleSalesRow[], key: keyof FlexibleSalesRow, value: key
 
 function pct(value: number) { return `${(value * 100).toFixed(1)}%`; }
 function shortDate(date: string) { return new Date(`${date}T00:00:00Z`).toLocaleDateString("en-LK", { day: "numeric", month: "short" }); }
+
+function friendlyModelName(name: string) {
+  const normalized = name.toLowerCase();
+  if (normalized.includes("calendar ridge")) return "Sales trend and calendar pattern";
+  if (normalized.includes("seasonal naive")) return "Recent weekly pattern";
+  if (normalized.includes("recent weekday")) return "Recent weekday pattern";
+  if (normalized.includes("robust weekday")) return "Stable weekday pattern";
+  if (normalized.includes("trend + weekday")) return "Trend and weekday pattern";
+  if (normalized.includes("autoets")) return "Trend and seasonal pattern";
+  if (normalized.includes("autoarima")) return "Historical sales pattern";
+  if (normalized.includes("theta")) return "Long-term trend pattern";
+  return "Best-performing sales pattern";
+}
+
+function detectCurrency(headers: string[]) {
+  const headerText = headers.join(" ").toLowerCase();
+  if (/\b(?:usd|dollar)\b/.test(headerText)) return "USD";
+  if (/\b(?:eur|euro)\b/.test(headerText)) return "EUR";
+  if (/\b(?:gbp|pound)\b/.test(headerText)) return "GBP";
+  if (/\b(?:inr|rupee)\b/.test(headerText) && !/lkr|sri lanka/.test(headerText)) return "INR";
+  return "LKR";
+}
 
 function LineChart({ historical, forecast, mode }: { historical: DailyPoint[]; forecast: ForecastPoint[]; mode: "history" | "forecast" }) {
   const ref = useRef<HTMLCanvasElement>(null);
@@ -106,17 +128,13 @@ export default function Home() {
   const [rows, setRows] = useState<FlexibleSalesRow[]>([]);
   const [fileName, setFileName] = useState("");
   const [loading, setLoading] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState("Reading your sales file…");
   const [error, setError] = useState("");
   const [uploadNotice, setUploadNotice] = useState("");
   const [section, setSection] = useState<"overview" | "forecast" | "products" | "methodology">("overview");
   const [category, setCategory] = useState("All categories");
   const [period, setPeriod] = useState("Full year");
   const [forecastDays, setForecastDays] = useState(30);
-  const [availableSheets, setAvailableSheets] = useState<RawSheet[]>([]);
-  const [preview, setPreview] = useState<ImportPreview | null>(null);
-  const [mappings, setMappings] = useState<MappingChoice[]>([]);
-  const [aiState, setAiState] = useState<"idle" | "loading" | "ready" | "fallback">("idle");
-  const [aiMessage, setAiMessage] = useState("");
   const [currency, setCurrency] = useState("LKR");
   const [importReport, setImportReport] = useState<ImportReport | null>(null);
   const [statsForecast, setStatsForecast] = useState<ForecastResult | null>(null);
@@ -132,42 +150,13 @@ export default function Home() {
     category: true, product: true, payment: true, promotion: true, customer: false, store: false,
   };
 
-  const aiRequest = useRef(0);
-
-  const preparePreview = useCallback((candidate: RawSheet, name: string) => {
-    const next = createImportPreview(name, candidate);
-    const request = ++aiRequest.current;
-    setPreview(next);
-    setMappings(suggestMappings(next.profiles));
-    setAiState("loading");
-    setAiMessage("Downloading the private browser AI model for its first use…");
-    setError("");
-    const headerText = next.headers.join(" ").toLowerCase();
-    if (/\b(?:usd|dollar)\b/.test(headerText)) setCurrency("USD");
-    else if (/\b(?:eur|euro)\b/.test(headerText)) setCurrency("EUR");
-    else if (/\b(?:gbp|pound)\b/.test(headerText)) setCurrency("GBP");
-    else if (/\b(?:inr|rupee)\b/.test(headerText) && !/lkr|sri lanka/.test(headerText)) setCurrency("INR");
-    else setCurrency("LKR");
-    mapColumnsWithLocalAI(next.profiles, (message) => { if (aiRequest.current === request) setAiMessage(message); })
-      .then((choices) => {
-        if (aiRequest.current !== request) return;
-        setMappings(choices);
-        setAiState("ready");
-        setAiMessage("Local AI mapping complete. Review uncertain fields before continuing.");
-      })
-      .catch(() => {
-        if (aiRequest.current !== request) return;
-        setAiState("fallback");
-        setAiMessage("The browser AI could not load on this device. Privacy-safe smart rules produced the mapping instead.");
-      });
-  }, []);
 
   const upload = async (event: ChangeEvent<HTMLInputElement>) => {
     const input = event.currentTarget;
     const file = input.files?.[0];
     if (!file) return;
     if (file.size > 25 * 1024 * 1024) { setError("Choose a file smaller than 25 MB so it can be processed safely in the browser."); input.value = ""; return; }
-    setLoading(true); setError(""); setUploadNotice("");
+    setLoading(true); setLoadingMessage("Reading your spreadsheet…"); setError(""); setUploadNotice("");
     try {
       const sheets = await readSalesFile(file);
       const usable = sheets.map((sheet) => {
@@ -180,8 +169,29 @@ export default function Home() {
       }).filter((value): value is { sheet: RawSheet; score: number } => Boolean(value));
       if (!usable.length) throw new Error("No worksheet with a usable header and sales rows was found.");
       usable.sort((a, b) => b.score - a.score);
-      setAvailableSheets(sheets);
-      preparePreview(usable[0].sheet, file.name);
+      const preview = createImportPreview(file.name, usable[0].sheet);
+      const safeMappings = suggestMappings(preview.profiles);
+      setCurrency(detectCurrency(preview.headers));
+      setLoadingMessage("Understanding your sales columns…");
+      let mappings = safeMappings;
+      try {
+        mappings = await mapColumnsWithLocalAI(preview.profiles, (message) => setLoadingMessage(message));
+      } catch {
+        setLoadingMessage("Using built-in sales matching rules…");
+      }
+      let applied;
+      try {
+        applied = applyMapping(preview, mappings);
+      } catch {
+        applied = applyMapping(preview, safeMappings);
+      }
+      setRows(applied.rows);
+      setImportReport(applied.report);
+      setFileName(file.name);
+      setCategory("All categories");
+      setPeriod("Full year");
+      setSection("overview");
+      setUploadNotice(`${file.name} is ready — ${number.format(applied.report.acceptedRows)} sales records loaded using ${applied.report.mappedFields.length} useful columns.`);
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : "The selected file could not be read.");
     } finally {
@@ -190,32 +200,6 @@ export default function Home() {
     }
   };
 
-  const updateMapping = (sourceIndex: number, target: CanonicalField | null) => {
-    setMappings((current) => current.map((choice) => {
-      if (choice.sourceIndex === sourceIndex) return { ...choice, target, confidence: target ? 1 : 0, method: "Manual", reason: target ? "Confirmed by the user." : "Ignored by the user." };
-      if (target && choice.target === target) return { ...choice, target: null, confidence: 0, method: "Manual", reason: "Replaced by another selected column." };
-      return choice;
-    }));
-  };
-
-  const confirmImport = () => {
-    if (!preview) return;
-    try {
-      const applied = applyMapping(preview, mappings);
-      setRows(applied.rows);
-      setImportReport(applied.report);
-      setFileName(preview.fileName);
-      setCategory("All categories");
-      setPeriod("Full year");
-      setSection("overview");
-      setUploadNotice(`${preview.fileName} loaded — ${number.format(applied.report.acceptedRows)} valid rows and ${applied.report.mappedFields.length} mapped fields.`);
-      setPreview(null);
-      setAvailableSheets([]);
-      setError("");
-    } catch (mappingError) {
-      setError(mappingError instanceof Error ? mappingError.message : "The selected mapping could not be applied.");
-    }
-  };
 
   const categories = useMemo(() => capabilities.category ? ["All categories", ...new Set(rows.map((r) => r.category))] : ["All categories"], [rows, capabilities.category]);
   const filtered = useMemo(() => {
@@ -245,22 +229,22 @@ export default function Home() {
     }
     if (!process.env.NEXT_PUBLIC_FORECAST_API_URL) {
       setForecastServiceState("setup");
-      setForecastServiceMessage("StatsForecast is ready in the codebase and will activate after the Render service URL is added to Vercel.");
+      setForecastServiceMessage("The quick forecast is ready. Connect the online forecast service to compare more approaches.");
       return;
     }
     const controller = new AbortController();
     setForecastServiceState("loading");
-    setForecastServiceMessage("Testing StatsForecast models on unseen historical periods.");
+    setForecastServiceMessage("Checking additional forecast approaches. You can use the estimate below while this finishes.");
     requestStatsForecast(dailyAll, forecastDays, controller.signal)
       .then((result) => {
         setStatsForecast(result);
         setForecastServiceState("ready");
-        setForecastServiceMessage("StatsForecast and local candidates were compared; the lowest historical error was selected.");
+        setForecastServiceMessage("Several approaches were checked against past sales. The best-performing estimate is now shown.");
       })
       .catch((forecastError) => {
         if (forecastError instanceof DOMException && forecastError.name === "AbortError") return;
         setForecastServiceState("fallback");
-        setForecastServiceMessage(forecastError instanceof Error ? forecastError.message : "StatsForecast is temporarily unavailable; the validated local candidate is shown.");
+        setForecastServiceMessage(forecastError instanceof Error ? forecastError.message : "The online check is unavailable, so the quick forecast is shown instead.");
       });
     return () => controller.abort();
   }, [dailyAll, forecastDays, localForecast]);
@@ -376,72 +360,8 @@ export default function Home() {
     }
   };
 
-  const mappedTargets = new Set(mappings.flatMap((choice) => choice.target ? [choice.target] : []));
-  const canImport = mappedTargets.has("date") && mappedTargets.has("netSales");
-  const enabledAnalytics = [
-    "Sales KPIs and trends",
-    "Weekday patterns",
-    "7-day, 30-day, 3-month and 6-month forecasts",
-    mappedTargets.has("profit") || mappedTargets.has("cost") ? "Profit and margin" : "",
-    mappedTargets.has("invoice") ? "Invoices and basket value" : "",
-    mappedTargets.has("quantity") ? "Units and demand" : "",
-    mappedTargets.has("category") ? "Category mix and outlook" : "",
-    mappedTargets.has("product") ? "Product rankings" : "",
-    mappedTargets.has("payment") ? "Payment mix" : "",
-    mappedTargets.has("promotion") || mappedTargets.has("discount") ? "Promotion analysis" : "",
-  ].filter(Boolean);
 
-  if (preview) return (
-    <main className="import-page">
-      <header className="import-topbar">
-        <div className="brand"><div className="brand-mark">RP</div><div><strong>RetailPulse</strong><span>AI DATA IMPORT</span></div></div>
-        <button className="text-button" onClick={() => { setPreview(null); setAvailableSheets([]); setError(""); }}>Cancel import</button>
-      </header>
-      <section className="import-shell">
-        <div className="import-heading">
-          <div><p className="eyebrow">PRIVATE, LOCAL AI</p><h1>Confirm what your columns mean</h1><p>The file stays in this browser. A free open-source model interprets the headers, while value checks prevent unsafe mappings.</p></div>
-          <div className={`ai-status ${aiState}`}><span>{aiState === "loading" ? "AI" : aiState === "ready" ? "✓" : "!"}</span><div><strong>{aiState === "loading" ? "Local AI is working" : aiState === "ready" ? "AI mapping ready" : "Smart fallback active"}</strong><small>{aiMessage || "Preparing the mapping model…"}</small></div></div>
-        </div>
-        {error && <div className="error-banner"><strong>Import issue</strong><span>{error}</span></div>}
-        <section className="import-controls">
-          <label>Worksheet<select value={preview.sheetName} onChange={(event) => {
-            const sheet = availableSheets.find((candidate) => candidate.sheet === event.target.value);
-            if (sheet) preparePreview(sheet, preview.fileName);
-          }}>{availableSheets.map((sheet) => <option key={sheet.sheet}>{sheet.sheet}</option>)}</select></label>
-          <label>Currency<select value={currency} onChange={(event) => setCurrency(event.target.value)}><option value="LKR">LKR — Sri Lankan rupee</option><option value="USD">USD — US dollar</option><option value="EUR">EUR — Euro</option><option value="GBP">GBP — British pound</option><option value="INR">INR — Indian rupee</option><option value="AUD">AUD — Australian dollar</option><option value="CAD">CAD — Canadian dollar</option></select></label>
-          <div><span>Detected header</span><strong>Row {preview.headerRow + 1} · {number.format(preview.rows.length)} data rows</strong></div>
-        </section>
-        <div className="core-requirement"><strong>Only two fields are essential:</strong> Sale date and Net sales. Other fields automatically unlock additional analytics.</div>
-        <section className="mapping-card">
-          <div className="mapping-head"><span>Uploaded column</span><span>Detected samples</span><span>Use as</span><span>Status</span></div>
-          {preview.profiles.map((profile) => {
-            const choice = mappings.find((item) => item.sourceIndex === profile.index);
-            const level = confidenceLabel(choice?.confidence || 0);
-            const mappingStatus = !choice?.target ? "Not used" : level === "High" ? "Ready" : "Check";
-            return <div className="mapping-row" key={profile.index}>
-              <div><strong>{profile.header}</strong><small>{profile.kind} · {number.format(profile.nonBlank)} values</small></div>
-              <span className="sample-values">{profile.samples.slice(0, 2).join(" · ") || "Empty"}</span>
-              <select disabled={aiState === "loading"} value={choice?.target || ""} onChange={(event) => updateMapping(profile.index, (event.target.value || null) as CanonicalField | null)}>
-                <option value="">Ignore this column</option>
-                {CANONICAL_FIELDS.map((field) => <option value={field} key={field}>{FIELD_DEFINITIONS[field].label}</option>)}
-              </select>
-              <div className={`mapping-confidence ${!choice?.target ? "unmapped" : level === "High" ? "ready" : "check"}`}><strong>{mappingStatus}</strong><small>{choice?.target ? choice.method : "Ignored automatically"}</small></div>
-            </div>;
-          })}
-        </section>
-        <section className="analytics-preview">
-          <div><p className="eyebrow">DYNAMIC DASHBOARD</p><h2>{enabledAnalytics.length} analytics capabilities will be enabled</h2><p>Features without supporting columns will be hidden rather than calculated from invented values.</p></div>
-          <div>{enabledAnalytics.map((item) => <span key={item}>✓ {item}</span>)}</div>
-        </section>
-        <div className="import-actions">
-          <button className="text-button" onClick={() => { setPreview(null); setAvailableSheets([]); setError(""); }}>Cancel</button>
-          <button className="auth-submit import-confirm" disabled={!canImport || aiState === "loading"} onClick={confirmImport}>{aiState === "loading" ? "Waiting for local AI…" : canImport ? "Generate compatible dashboard" : "Map date and sales to continue"}</button>
-        </div>
-      </section>
-    </main>
-  );
-
-  if (loading) return <main className="loading"><div className="loading-mark">RP</div><h1>Reading your sales file</h1><p>Finding worksheets, headers and usable sales columns…</p><div className="loader"><span /></div></main>;
+  if (loading) return <main className="app-loading"><div className="loading-mark">RP</div><h1>Preparing your dashboard</h1><p>{loadingMessage}</p><div className="loader"><span /></div><small>This usually takes less than a minute on first use.</small></main>;
 
   if (!rows.length) return (
     <main className="app-shell empty-shell">
@@ -449,15 +369,15 @@ export default function Home() {
         <div className="brand"><div className="brand-mark">RP</div><div><strong>RetailPulse</strong><span>AI Sales Intelligence</span></div></div>
         <nav aria-label="Dashboard sections">
           <button className="active"><Icon>⌂</Icon>Get started</button>
-          <button disabled><Icon>↗</Icon>Predictive analysis</button>
-          <button disabled><Icon>▦</Icon>Products & categories</button>
-          <button disabled><Icon>◎</Icon>Methodology</button>
+          <button disabled><Icon>↗</Icon>Sales forecast</button>
+          <button disabled><Icon>▦</Icon>What sells best</button>
+          <button disabled><Icon>◎</Icon>How it works</button>
         </nav>
         <div className="sidebar-note"><span>Private workspace</span><p>Your uploaded file is processed locally in this browser.</p></div>
       </aside>
       <section className="workspace">
         <header className="topbar">
-          <div><p className="eyebrow">SME PERFORMANCE CENTRE</p><h1>Start your sales analysis</h1></div>
+          <div><p className="eyebrow">YOUR BUSINESS DASHBOARD</p><h1>Turn sales data into clear decisions</h1></div>
           <AccountMenu />
         </header>
         {error && <div className="error-banner"><strong>File issue</strong><span>{error}</span></div>}
@@ -465,7 +385,7 @@ export default function Home() {
           <div className="empty-upload-mark" aria-hidden="true">⇧</div>
           <p className="eyebrow">YOUR DATA, YOUR WORKSPACE</p>
           <h2>Upload almost any sales spreadsheet</h2>
-          <p>RetailPulse uses free local AI to understand your columns, confirms uncertain mappings, and builds only the analytics your data can support.</p>
+          <p>Choose your file and RetailPulse will automatically understand it, check it, and take you straight to the insights your business can use.</p>
           <label className="upload-button upload-primary">Choose sales file<input aria-label="Upload sales data file" type="file" accept=".csv,.tsv,.txt,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={upload} /></label>
           <div className="upload-requirements">
             <div><strong>Accepted formats</strong><span>CSV, TSV and Excel XLSX · multiple worksheets supported</span></div>
@@ -473,7 +393,7 @@ export default function Home() {
             <div><strong>Private local AI</strong><span>Mapping runs in your browser; sales rows are not sent to an AI provider</span></div>
           </div>
         </section>
-        <footer><span>RetailPulse AI · CIS 6000 Research Prototype</span><span>Predictions support decisions; they do not replace managerial judgement.</span></footer>
+        <footer><span>RetailPulse · Sales intelligence for SMEs</span><span>Your file stays private in this browser.</span></footer>
       </section>
     </main>
   );
@@ -484,18 +404,18 @@ export default function Home() {
         <div className="brand"><div className="brand-mark">RP</div><div><strong>RetailPulse</strong><span>AI Sales Intelligence</span></div></div>
         <nav aria-label="Dashboard sections">
           <button className={section === "overview" ? "active" : ""} onClick={() => setSection("overview")}><Icon>⌂</Icon>Overview</button>
-          <button className={section === "forecast" ? "active" : ""} onClick={() => setSection("forecast")}><Icon>↗</Icon>Predictive analysis</button>
-          <button disabled={!capabilities.product && !capabilities.category} className={section === "products" ? "active" : ""} onClick={() => setSection("products")}><Icon>▦</Icon>Products & categories</button>
-          <button className={section === "methodology" ? "active" : ""} onClick={() => setSection("methodology")}><Icon>◎</Icon>Methodology</button>
+          <button className={section === "forecast" ? "active" : ""} onClick={() => setSection("forecast")}><Icon>↗</Icon>Sales forecast</button>
+          <button disabled={!capabilities.product && !capabilities.category} className={section === "products" ? "active" : ""} onClick={() => setSection("products")}><Icon>▦</Icon>What sells best</button>
+          <button className={section === "methodology" ? "active" : ""} onClick={() => setSection("methodology")}><Icon>◎</Icon>How it works</button>
         </nav>
-        <div className="sidebar-note"><span>Academic prototype</span><p>AI-supported decision-making for Sri Lankan SMEs.</p></div>
+        <div className="sidebar-note"><span>Made for business owners</span><p>Clear answers from your own sales data, without analytics jargon.</p></div>
       </aside>
 
       <section className="workspace">
         <header className="topbar">
-          <div><p className="eyebrow">SME PERFORMANCE CENTRE</p><h1>{section === "overview" ? "Sales overview" : section === "forecast" ? "Predictive analysis" : section === "products" ? "Product intelligence" : "Model methodology"}</h1></div>
+          <div><p className="eyebrow">YOUR BUSINESS DASHBOARD</p><h1>{section === "overview" ? "Your business at a glance" : section === "forecast" ? "Plan your next sales period" : section === "products" ? "See what drives your sales" : "How your forecast works"}</h1></div>
           <div className="top-actions">
-            <div className="data-status"><span className="status-dot" /><div><strong>{fileName}</strong><small>{number.format(rows.length)} validated lines</small></div></div>
+            <div className="data-status"><span className="status-dot" /><div><strong>{fileName}</strong><small>{number.format(rows.length)} sales records ready</small></div></div>
             <label className="upload-button">Upload new file<input aria-label="Upload sales data file" type="file" accept=".csv,.tsv,.txt,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={upload} /></label>
             <AccountMenu />
           </div>
@@ -506,66 +426,67 @@ export default function Home() {
 
         {section !== "methodology" && <div className="filterbar">
           {capabilities.category && <label>Category<select value={category} onChange={(e) => setCategory(e.target.value)}>{categories.map((c) => <option key={c}>{c}</option>)}</select></label>}
-          <label>Historical period<select value={period} onChange={(e) => setPeriod(e.target.value)}><option>Full year</option><option>Last 90 days</option><option>Last 30 days</option></select></label>
+          <label>Show results for<select value={period} onChange={(e) => setPeriod(e.target.value)}><option value="Full year">All available data</option><option value="Last 90 days">Last 90 days</option><option value="Last 30 days">Last 30 days</option></select></label>
           <div className="filter-meta"><span>Data period</span><strong>{dailyAll[0]?.date} — {dailyAll.at(-1)?.date}</strong></div>
         </div>}
 
         {section === "overview" && <>
           <section className="kpi-grid">
-            <article className="kpi primary"><span>Net sales</span><strong>{money.format(metrics.net)}</strong><small>{capabilities.invoices ? `${number.format(metrics.invoices)} completed invoices` : `${number.format(filtered.length)} accepted sales rows`}</small></article>
-            {capabilities.profit && <article className="kpi"><span>Gross profit</span><strong>{money.format(metrics.profit)}</strong><small className="positive">{pct(metrics.margin)} gross margin</small></article>}
-            {capabilities.quantity && <article className="kpi"><span>Units sold</span><strong>{number.format(metrics.units)}</strong><small>{capabilities.invoices ? `${(metrics.units / Math.max(1, metrics.invoices)).toFixed(1)} units per basket` : "From the mapped quantity column"}</small></article>}
-            {capabilities.invoices && <article className="kpi"><span>Average basket</span><strong>{money.format(metrics.basket)}</strong><small>Across selected invoices</small></article>}
+            <article className="kpi primary"><span>Sales revenue</span><strong>{money.format(metrics.net)}</strong><small>{capabilities.invoices ? `${number.format(metrics.invoices)} customer sales` : `${number.format(filtered.length)} sales records`}</small></article>
+            {capabilities.profit && <article className="kpi"><span>Gross profit</span><strong>{money.format(metrics.profit)}</strong><small className="positive">{pct(metrics.margin)} of revenue kept as gross profit</small></article>}
+            {capabilities.quantity && <article className="kpi"><span>Items sold</span><strong>{number.format(metrics.units)}</strong><small>{capabilities.invoices ? `${(metrics.units / Math.max(1, metrics.invoices)).toFixed(1)} items per customer sale` : "Total quantity in this period"}</small></article>}
+            {capabilities.invoices && <article className="kpi"><span>Average customer sale</span><strong>{money.format(metrics.basket)}</strong><small>Average revenue per invoice</small></article>}
           </section>
           {importReport && <section className="import-summary" aria-label="Import quality summary">
-            <div><span>AI-mapped fields</span><strong>{importReport.mappedFields.length}</strong></div>
-            <div><span>Accepted rows</span><strong>{number.format(importReport.acceptedRows)}</strong></div>
-            <div><span>Rejected rows</span><strong>{number.format(importReport.rejectedRows)}</strong></div>
+            <div><span>Useful columns found</span><strong>{importReport.mappedFields.length}</strong></div>
+            <div><span>Sales records used</span><strong>{number.format(importReport.acceptedRows)}</strong></div>
+            <div><span>Rows skipped</span><strong>{number.format(importReport.rejectedRows)}</strong></div>
             <div><span>Possible duplicates</span><strong>{number.format(importReport.exactDuplicateRows)}</strong></div>
-            <p>{importReport.rejectedRows || importReport.exactDuplicateRows ? "Review rejected or duplicate source rows before using this dashboard for financial reporting." : "The mapped date and sales fields passed the import checks."}</p>
+            <p>{importReport.rejectedRows || importReport.exactDuplicateRows ? "Some records may need attention before using these totals for formal accounts." : "Your sales file passed the automatic checks."}</p>
           </section>}
 
           <section className="dashboard-grid">
-            <article className="panel span-2"><div className="panel-head"><div><p>PERFORMANCE TREND</p><h2>Daily net sales</h2></div><span className="legend"><i />Actual sales</span></div><LineChart historical={dailyFiltered} forecast={[]} mode="history" /></article>
-            {capabilities.category && <article className="panel"><div className="panel-head"><div><p>SALES MIX</p><h2>Revenue by category</h2></div></div><div className="bar-list">{categorySales.slice(0, 7).map(([name, value]) => <div className="bar-row" key={name}><div><span>{name}</span><strong>{compact.format(value)}</strong></div><div className="bar-track"><i style={{ width: `${value / maxCategory * 100}%` }} /></div></div>)}</div></article>}
-            {capabilities.payment && <article className="panel"><div className="panel-head"><div><p>CUSTOMER BEHAVIOUR</p><h2>Payment mix</h2></div></div><div className="donut-wrap"><div className="donut" style={{ background: donut }}><span><strong>{payments.length}</strong>methods</span></div><div className="donut-legend">{payments.map(([name, value], i) => <div key={name}><i style={{ background: paymentColors[i % paymentColors.length] }} /><span>{name}</span><strong>{pct(value / paymentTotal)}</strong></div>)}</div></div></article>}
-            <article className="panel"><div className="panel-head"><div><p>TRADING PATTERN</p><h2>Average sales by weekday</h2></div></div><div className="weekday-chart">{weekday.map((d) => <div key={d.name}><span>{compact.format(d.value)}</span><i style={{ height: `${Math.max(7, d.value / maxWeekday * 100)}%` }} /><small>{d.name}</small></div>)}</div></article>
-            <article className="panel span-2 insight-panel"><div className="insight-mark">AI</div><div><p>MANAGEMENT BRIEF</p><h2>{topCategory ? `${topCategory[0]} leads the selected sales mix` : "Sales data is ready"}</h2><p>{topCategory ? `${topCategory[0]} contributes ${pct(topCategory[1] / Math.max(1, metrics.net))} of net sales. ${promotions.length ? `${promotions[0][0]} generated the largest promotional discount value.` : "No promotion is selected in this view."} Open Predictive Analysis for the next-period outlook.` : "Core sales trends are available. Additional panels appear only when matching columns are present."}</p></div><button onClick={() => setSection("forecast")}>View forecast →</button></article>
+            <article className="panel span-2"><div className="panel-head"><div><p>SALES MOVEMENT</p><h2>How your sales changed over time</h2></div><span className="legend"><i />Your sales</span></div><LineChart historical={dailyFiltered} forecast={[]} mode="history" /></article>
+            {capabilities.category && <article className="panel"><div className="panel-head"><div><p>WHERE MONEY COMES FROM</p><h2>Sales by category</h2></div></div><div className="bar-list">{categorySales.slice(0, 7).map(([name, value]) => <div className="bar-row" key={name}><div><span>{name}</span><strong>{compact.format(value)}</strong></div><div className="bar-track"><i style={{ width: `${value / maxCategory * 100}%` }} /></div></div>)}</div></article>}
+            {capabilities.payment && <article className="panel"><div className="panel-head"><div><p>HOW CUSTOMERS PAY</p><h2>Payment methods used</h2></div></div><div className="donut-wrap"><div className="donut" style={{ background: donut }}><span><strong>{payments.length}</strong>methods</span></div><div className="donut-legend">{payments.map(([name, value], i) => <div key={name}><i style={{ background: paymentColors[i % paymentColors.length] }} /><span>{name}</span><strong>{pct(value / paymentTotal)}</strong></div>)}</div></div></article>}
+            <article className="panel"><div className="panel-head"><div><p>BUSIEST DAYS</p><h2>Your average sales by weekday</h2></div></div><div className="weekday-chart">{weekday.map((d) => <div key={d.name}><span>{compact.format(d.value)}</span><i style={{ height: `${Math.max(7, d.value / maxWeekday * 100)}%` }} /><small>{d.name}</small></div>)}</div></article>
+            <article className="panel span-2 insight-panel"><div className="insight-mark">AI</div><div><p>BUSINESS SNAPSHOT</p><h2>{topCategory ? `${topCategory[0]} brings in the most sales` : "Your sales data is ready"}</h2><p>{topCategory ? `${topCategory[0]} provides ${pct(topCategory[1] / Math.max(1, metrics.net))} of revenue. ${promotions.length ? `${promotions[0][0]} created the highest promotional discount value.` : "No promotion details are available for this view."} Open Sales Forecast to plan ahead.` : "Your main sales trends are ready. More views appear automatically when your file contains matching information."}</p></div><button onClick={() => setSection("forecast")}>Plan ahead →</button></article>
           </section>
         </>}
 
-        {section === "forecast" && !forecast && <section className="panel forecast-unavailable"><p className="eyebrow">INSUFFICIENT HISTORY</p><h2>More daily sales history is needed</h2><p>The {forecastDays}-day forecast requires at least {minimumHistoryDays(forecastDays)} calendar days so models can be tested on unseen periods. This file currently provides {dailyAll.length} days.</p></section>}
+        {section === "forecast" && !forecast && <section className="panel forecast-unavailable"><p className="eyebrow">MORE SALES HISTORY NEEDED</p><h2>There is not enough past data for this forecast yet</h2><p>A {forecastDays}-day forecast needs at least {minimumHistoryDays(forecastDays)} days of sales history. Your file currently contains {dailyAll.length} days. Choose a shorter forecast period or upload more history.</p></section>}
 
         {section === "forecast" && forecast && <>
           <section className="forecast-hero">
-            <div><p className="eyebrow">ROLLING-BACKTESTED FORECAST</p><h2>{forecastDays}-day sales outlook</h2><div className="forecast-value"><strong>{money.format(futureTotal)}</strong><span className={forecastChange >= 0 ? "positive-pill" : "negative-pill"}>{forecastChange >= 0 ? "+" : ""}{pct(forecastChange)} vs previous {forecastDays} days</span></div><p>{forecast.winner.name} was selected from {forecast.models.length} local and StatsForecast candidates across {forecast.folds} unseen historical periods. Daily ranges reflect historical errors.</p></div>
+            <div><p className="eyebrow">YOUR SALES FORECAST</p><h2>Expected sales for the next {forecastDays} days</h2><div className="forecast-value"><strong>{money.format(futureTotal)}</strong><span className={forecastChange >= 0 ? "positive-pill" : "negative-pill"}>{forecastChange >= 0 ? "+" : ""}{pct(forecastChange)} compared with the previous {forecastDays} days</span></div><p>Based on {dataProfile.historyDays} days of your sales history. RetailPulse checked several approaches and chose the one that worked best on your past data.</p></div>
             <div className="horizon-toggle" aria-label="Forecast horizon"><button className={forecastDays === 7 ? "active" : ""} onClick={() => setForecastDays(7)}>7 days</button><button className={forecastDays === 30 ? "active" : ""} onClick={() => setForecastDays(30)}>30 days</button><button className={forecastDays === 90 ? "active" : ""} onClick={() => setForecastDays(90)}>3 months</button><button className={forecastDays === 180 ? "active" : ""} onClick={() => setForecastDays(180)}>6 months</button></div>
           </section>
-          <div className={`service-status ${forecastServiceState}`} role="status"><strong>{forecastServiceState === "loading" ? "Testing models" : forecastServiceState === "ready" ? "Hybrid engine ready" : forecastServiceState === "setup" ? "Render setup required" : forecastServiceState === "fallback" ? "Local model active" : "Forecast ready"}</strong><span>{forecastServiceMessage || "The best backtested candidate is shown."}</span></div>
-          <div className={`forecast-confidence ${forecast.confidence.toLowerCase().replace(" ", "-")}`} role="status"><strong>{cautiousForecast ? "Planning estimate" : "Decision-support forecast"}</strong><span>Expected historical error is approximately {pct(forecast.winner.wape)}. {cautiousForecast ? "Use the displayed range and current business information before acting." : "The result is suitable for planning when combined with current business information."}</span></div>
+          <div className={`service-status is-${forecastServiceState}`} role="status"><strong>{forecastServiceState === "loading" ? "Improving your forecast" : forecastServiceState === "ready" ? "Forecast updated" : forecastServiceState === "setup" || forecastServiceState === "fallback" ? "Quick forecast active" : "Forecast ready"}</strong><span>{forecastServiceMessage || "The estimate with the smallest past difference is shown."}</span></div>
+          <div className={`forecast-confidence ${forecast.confidence.toLowerCase().replace(" ", "-")}`} role="status"><strong>{cautiousForecast ? "Use with care" : "Useful for planning"}</strong><span>When tested on past sales, estimates typically differed by about {pct(forecast.winner.wape)}. {cautiousForecast ? "Plan using the shaded range, not only the centre number." : "Use this with what you know about upcoming promotions, holidays and stock changes."}</span></div>
           <section className="dashboard-grid forecast-grid">
-            <article className="panel span-2"><div className="panel-head"><div><p>FORWARD VIEW</p><h2>Actual and predicted sales</h2></div><div className="two-legends"><span className="legend"><i />Actual</span><span className="legend forecast"><i />Forecast + 80% historical-error range</span></div></div><LineChart historical={dailyAll} forecast={forecast.points} mode="forecast" /></article>
-            <article className="panel accuracy-card"><div className="panel-head"><div><p>ROLLING BACKTEST</p><h2>Historical forecast error</h2></div></div><div className="accuracy-score"><strong>{pct(forecast.winner.wape)}</strong><span>Expected error · lower is better</span></div><dl><div><dt>Engine</dt><dd>{forecast.engine || "Local models"}</dd></div><div><dt>Selected model</dt><dd>{forecast.winner.name}</dd></div><div><dt>Typical daily error</dt><dd>±{money.format(forecast.winner.mae)}</dd></div><div><dt>Forecast bias</dt><dd>{pct(Math.abs(forecast.winner.bias))} {forecast.winner.bias >= 0 ? "under" : "over"}</dd></div><div><dt>Validation coverage</dt><dd>{forecast.folds} tests · {forecast.evaluatedDays} days</dd></div></dl></article>
-            <article className="panel"><div className="panel-head"><div><p>MODEL COMPARISON</p><h2>Rolling historical error</h2></div></div><div className="model-compare">{comparedModels.map((model) => <div className={model.name === forecast.winner.name ? "winner" : ""} key={model.name}><span>{model.name}</span><strong>{pct(model.wape)} WAPE</strong><i><b style={{ width: `${model.wape / maxComparedWape * 100}%` }} /></i></div>)}</div><small className="fine-print">Longer bars mean more error. The selected model has the lowest combined WAPE across unseen periods and improves on the weekly baseline by {pct(forecast.relativeImprovement)}.</small></article>
-            {capabilities.category && <article className="panel span-2"><div className="panel-head"><div><p>CATEGORY OUTLOOK</p><h2>Expected demand over the next {forecastDays} days</h2></div></div><div className="forecast-table"><div className="table-head"><span>Category</span><span>Forecast sales</span><span>Expected units</span><span>Momentum</span></div>{categoryForecasts.map((c) => <div className="table-row" key={c.name}><strong>{c.name}</strong><span>{money.format(c.sales)}</span><span>{capabilities.quantity ? number.format(c.units) : "Not available"}</span><span className={c.change >= 0 ? "positive" : "negative"}>{c.change >= 0 ? "+" : ""}{pct(c.change)}</span></div>)}</div></article>}
-            <article className="panel executive-card"><div className="executive-label"><span>AI</span>DEEPSEEK ANALYST</div>{deepSeekInsight ? <><h2>{deepSeekInsight.headline}</h2><p>{deepSeekInsight.summary}</p><div className="ai-recommendations"><strong>Recommended actions</strong><ul>{deepSeekInsight.actions.map((action) => <li key={action}>{action}</li>)}</ul></div>{deepSeekInsight.risks.length > 0 && <div className="summary-action"><strong>Risks to check</strong><span>{deepSeekInsight.risks.join(" ")}</span></div>}</> : <><h2>Verified forecast ready for explanation</h2><p>The selected {forecast.winner.name.toLowerCase()} estimates {money.format(futureTotal)} over the next {forecastDays} days, with expected historical error of {pct(forecast.winner.wape)}.</p><p>{topGrowth ? `${topGrowth.name} has the strongest recent category momentum at ${topGrowth.change >= 0 ? "+" : ""}${pct(topGrowth.change)}.` : "Category momentum will appear when matching data is available."}</p><button className="deepseek-button" disabled={deepSeekState === "loading"} onClick={generateDeepSeekInsight}>{deepSeekState === "loading" ? "DeepSeek is analysing…" : "Generate AI analysis"}</button>{deepSeekMessage && <small className="deepseek-message">{deepSeekMessage}</small>}</>}</article>
-            <article className="panel span-3 data-readiness"><div className="panel-head"><div><p>DATA READINESS</p><h2>What the model had available</h2></div></div><div><span><strong>{dataProfile.historyDays}</strong>calendar days</span><span><strong>{dataProfile.zeroDays}</strong>zero or missing-date days</span><span><strong>{dataProfile.unusualDays}</strong>IQR-flagged high-sales days</span><span><strong>{pct(forecast.intervalCoverage)}</strong>historical range coverage</span></div></article>
+            <article className="panel span-2"><div className="panel-head"><div><p>WHAT MAY HAPPEN NEXT</p><h2>Past sales and expected future sales</h2></div><div className="two-legends"><span className="legend"><i />Past sales</span><span className="legend forecast"><i />Expected sales range</span></div></div><LineChart historical={dailyAll} forecast={forecast.points} mode="forecast" /></article>
+            <article className="panel accuracy-card"><div className="panel-head"><div><p>HOW RELIABLE IS IT?</p><h2>How close past estimates were</h2></div></div><div className="accuracy-score"><strong>{pct(forecast.winner.wape)}</strong><span>Typical past difference · lower is better</span></div><dl><div><dt>Chosen approach</dt><dd>{friendlyModelName(forecast.winner.name)}</dd></div><div><dt>Typical daily difference</dt><dd>±{money.format(forecast.winner.mae)}</dd></div><div><dt>Usual direction</dt><dd>{pct(Math.abs(forecast.winner.bias))} {forecast.winner.bias >= 0 ? "below actual sales" : "above actual sales"}</dd></div><div><dt>Past checks completed</dt><dd>{forecast.folds} periods covering {forecast.evaluatedDays} days</dd></div></dl></article>
+            <article className="panel"><div className="panel-head"><div><p>WHY THIS ESTIMATE?</p><h2>Past performance of each approach</h2></div></div><div className="model-compare">{comparedModels.map((model) => <div className={model.name === forecast.winner.name ? "winner" : ""} key={model.name}><span>{friendlyModelName(model.name)}</span><strong>{pct(model.wape)} difference</strong><i><b style={{ width: `${model.wape / maxComparedWape * 100}%` }} /></i></div>)}</div><small className="fine-print">Shorter bars performed better on past sales. RetailPulse automatically uses the best result for the period you selected.</small></article>
+            {capabilities.category && <article className="panel span-2"><div className="panel-head"><div><p>PLAN BY CATEGORY</p><h2>Expected sales over the next {forecastDays} days</h2></div></div><div className="forecast-table"><div className="table-head"><span>Category</span><span>Expected sales</span><span>Expected items</span><span>Change</span></div>{categoryForecasts.map((c) => <div className="table-row" key={c.name}><strong>{c.name}</strong><span>{money.format(c.sales)}</span><span>{capabilities.quantity ? number.format(c.units) : "Not available"}</span><span className={c.change >= 0 ? "positive" : "negative"}>{c.change >= 0 ? "+" : ""}{pct(c.change)}</span></div>)}</div></article>}
+            <article className="panel executive-card"><div className="executive-label"><span>AI</span>AI BUSINESS ADVISER</div>{deepSeekInsight ? <><h2>{deepSeekInsight.headline}</h2><p>{deepSeekInsight.summary}</p><div className="ai-recommendations"><strong>Recommended actions</strong><ul>{deepSeekInsight.actions.map((action) => <li key={action}>{action}</li>)}</ul></div>{deepSeekInsight.risks.length > 0 && <div className="summary-action"><strong>Things to check</strong><span>{deepSeekInsight.risks.join(" ")}</span></div>}</> : <><h2>Turn this forecast into an action plan</h2><p>RetailPulse expects about {money.format(futureTotal)} in sales over the next {forecastDays} days. Past estimates using this approach differed by around {pct(forecast.winner.wape)}.</p><p>{topGrowth ? `${topGrowth.name} currently shows the strongest category growth at ${topGrowth.change >= 0 ? "+" : ""}${pct(topGrowth.change)}.` : "Category opportunities will appear when that information is available."}</p><button className="deepseek-button" disabled={deepSeekState === "loading"} onClick={generateDeepSeekInsight}>{deepSeekState === "loading" ? "Preparing recommendations…" : "Explain this forecast"}</button>{deepSeekMessage && <small className="deepseek-message">{deepSeekMessage}</small>}</>}</article>
+            <article className="panel span-3 data-readiness"><div className="panel-head"><div><p>DATA BEHIND THIS FORECAST</p><h2>What RetailPulse used</h2></div></div><div><span><strong>{dataProfile.historyDays}</strong>days of sales history</span><span><strong>{dataProfile.zeroDays}</strong>days with no recorded sales</span><span><strong>{dataProfile.unusualDays}</strong>unusually high-sales days</span><span><strong>{importReport?.mappedFields.length || 2}</strong>useful columns identified</span></div></article>
           </section>
         </>}
 
         {section === "products" && <section className="dashboard-grid products-grid">
-          {capabilities.product && <article className="panel span-2"><div className="panel-head"><div><p>PRODUCT RANKING</p><h2>Top products by net sales</h2></div></div><div className="product-ranking">{productSales.map(([name, value], i) => <div key={name}><span className="rank">{String(i + 1).padStart(2, "0")}</span><div><strong>{name}</strong><i><b style={{ width: `${value / maxProduct * 100}%` }} /></i></div><span>{money.format(value)}</span></div>)}</div></article>}
-          {capabilities.category && <article className="panel"><div className="panel-head"><div><p>CATEGORY CONTRIBUTION</p><h2>Portfolio concentration</h2></div></div><div className="category-cards">{categorySales.slice(0, 5).map(([name, value], i) => <div key={name}><span>{i + 1}</span><div><strong>{name}</strong><small>{pct(value / Math.max(1, metrics.net))} of sales</small></div><b>{compact.format(value)}</b></div>)}</div></article>}
-          <article className="panel span-3"><div className="panel-head"><div><p>DECISION SUPPORT</p><h2>How to use the available product data</h2></div></div><div className="decision-steps"><div><span>01</span><strong>Prioritise</strong><p>Focus forecasting on top-selling SKUs where stock-outs have the greatest revenue impact.</p></div><div><span>02</span><strong>Plan</strong><p>{capabilities.quantity ? "Combine expected unit demand with supplier lead time and a manager-defined safety-stock level." : "Add a quantity column in a future file to unlock unit-demand planning."}</p></div><div><span>03</span><strong>Review</strong><p>Track actual versus predicted demand weekly and investigate large exceptions before reordering.</p></div></div></article>
+          {capabilities.product && <article className="panel span-2"><div className="panel-head"><div><p>YOUR BEST SELLERS</p><h2>Products bringing in the most revenue</h2></div></div><div className="product-ranking">{productSales.map(([name, value], i) => <div key={name}><span className="rank">{String(i + 1).padStart(2, "0")}</span><div><strong>{name}</strong><i><b style={{ width: `${value / maxProduct * 100}%` }} /></i></div><span>{money.format(value)}</span></div>)}</div></article>}
+          {capabilities.category && <article className="panel"><div className="panel-head"><div><p>YOUR SALES MIX</p><h2>Share of sales by category</h2></div></div><div className="category-cards">{categorySales.slice(0, 5).map(([name, value], i) => <div key={name}><span>{i + 1}</span><div><strong>{name}</strong><small>{pct(value / Math.max(1, metrics.net))} of sales</small></div><b>{compact.format(value)}</b></div>)}</div></article>}
+          <article className="panel span-3"><div className="panel-head"><div><p>SIMPLE NEXT STEPS</p><h2>How to use these product insights</h2></div></div><div className="decision-steps"><div><span>01</span><strong>Protect best sellers</strong><p>Keep your strongest products available because stock-outs here put the most revenue at risk.</p></div><div><span>02</span><strong>Plan stock</strong><p>{capabilities.quantity ? "Compare expected item demand with supplier delivery time before placing orders." : "Include an item quantity column next time to unlock stock planning."}</p></div><div><span>03</span><strong>Check weekly</strong><p>Compare actual demand with the forecast each week and investigate large changes early.</p></div></div></article>
         </section>}
 
         {section === "methodology" && <section className="methodology">
-          <div className="method-intro"><p className="eyebrow">TRANSPARENT PREDICTIVE ANALYTICS</p><h2>Forecasts that can be explained and evaluated</h2><p>RetailPulse first interprets unfamiliar spreadsheets, then enables only evidence-supported analytics. Forecasts remain calculated and backtested rather than generated by a language model.</p></div>
-          <div className="method-flow"><article><span>1</span><div><h3>Interpret locally</h3><p>Read CSV, TSV or XLSX sheets, find the header row, and use the browser model to understand unfamiliar columns.</p></div></article><article><span>2</span><div><h3>Validate the data</h3><p>Require date and sales, reject invalid core rows, and never invent missing financial fields.</p></div></article><article><span>3</span><div><h3>Test forecast engines</h3><p>Compare local candidates with StatsForecast AutoETS, AutoARIMA and Theta models on chronological unseen periods.</p></div></article><article><span>4</span><div><h3>Select by evidence</h3><p>Choose the lowest-error candidate separately for 7-day, 30-day, 3-month and 6-month horizons.</p></div></article><article><span>5</span><div><h3>Explain with DeepSeek</h3><p>Send only verified summary metrics to DeepSeek for plain-language findings and actions; raw spreadsheet rows are not sent.</p></div></article></div>
-          <div className="method-cards"><article><p>PRIMARY METRIC</p><strong>WAPE</strong><span>Total absolute forecast error divided by actual sales. Lower is better; it is not converted into an “accuracy” claim.</span></article><article><p>CONTROL MODEL</p><strong>Seasonal naive</strong><span>A candidate must demonstrate value against simply repeating the most recent week.</span></article><article><p>VALIDATION DESIGN</p><strong>Up to 8 folds</strong><span>Each horizon is evaluated separately across chronological historical periods before a model is selected.</span></article></div>
-          <div className="disclosure"><strong>Data-use disclosure</strong><p>Raw spreadsheet rows are processed in the browser and are not retained. Daily date-and-sales totals are sent to the Render forecasting service. DeepSeek receives only compact verified metrics when the user requests an AI analysis.</p></div>
+          <div className="method-intro"><p className="eyebrow">CLEAR AND HONEST</p><h2>How RetailPulse creates your forecast</h2><p>You do not need to choose a statistical model. RetailPulse checks the options, shows how close they were on past sales, and explains the result in everyday language.</p></div>
+          <div className="method-flow"><article><span>1</span><div><h3>Understand your spreadsheet</h3><p>RetailPulse automatically finds the date, sales and other useful columns in your file.</p></div></article><article><span>2</span><div><h3>Check the information</h3><p>Invalid dates and sales values are skipped, and missing financial figures are never invented.</p></div></article><article><span>3</span><div><h3>Find what works best</h3><p>Several forecasting approaches are tried on older parts of your own sales history. The approach that came closest is used.</p></div></article><article><span>4</span><div><h3>Turn the result into action</h3><p>The forecast provides the numbers. DeepSeek can then explain them and suggest practical questions or actions.</p></div></article></div>
+          <div className="method-cards"><article><p>CHECKED ON YOUR HISTORY</p><strong>Past performance first</strong><span>The dashboard tests each approach on sales it already knows, before using it for the future.</span></article><article><p>NO MADE-UP NUMBERS</p><strong>Calculations stay separate from AI</strong><span>The forecast engine calculates the estimate. AI only explains verified results.</span></article><article><p>PRIVATE BY DESIGN</p><strong>Your raw rows stay local</strong><span>Your spreadsheet is read in this browser and is not uploaded to DeepSeek.</span></article></div>
+          <details className="technical-details"><summary>Technical details for reviewers</summary><p>Forecasts compare local calendar and weekday approaches with StatsForecast AutoETS, AutoARIMA and Theta candidates. Selection uses rolling historical tests and WAPE; lower values mean smaller past differences.</p></details>
+          <div className="disclosure"><strong>How your data is used</strong><p>Your spreadsheet rows are processed in this browser and are not retained. Only daily date-and-sales totals go to the forecasting service. DeepSeek receives a short summary only when you click “Explain this forecast.”</p></div>
         </section>}
-        <footer><span>RetailPulse AI · CIS 6000 Research Prototype</span><span>Predictions support decisions; they do not replace managerial judgement.</span></footer>
+        <footer><span>RetailPulse · Sales intelligence for SMEs</span><span>Use forecasts as a planning guide alongside your business knowledge.</span></footer>
       </section>
     </main>
   );
