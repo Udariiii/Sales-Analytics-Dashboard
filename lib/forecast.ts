@@ -157,12 +157,39 @@ function calendarRidgeForecast(history: DailyPoint[], horizon: number) {
   });
 }
 
+
+function annualSeasonalForecast(history: DailyPoint[], horizon: number) {
+  if (history.length < 392) return calendarRidgeForecast(history, horizon);
+  const lag = 364;
+  const mean = (points: DailyPoint[]) => points.reduce((sum, point) => sum + point.sales, 0) / Math.max(1, points.length);
+  const recentMean = mean(history.slice(-56));
+  const priorYearMean = mean(history.slice(-lag - 56, -lag));
+  const levelAdjustment = Math.max(0.85, Math.min(1.15, priorYearMean ? recentMean / priorYearMean : 1));
+  const fallback = calendarRidgeForecast(history, horizon);
+  return Array.from({ length: horizon }, (_, i) => {
+    const source = history[history.length - lag + i]?.sales;
+    return Math.max(0, (source ?? fallback[i]) * levelAdjustment);
+  });
+}
+
+function calendarAnnualBlend(history: DailyPoint[], horizon: number) {
+  const calendar = calendarRidgeForecast(history, horizon);
+  const annual = annualSeasonalForecast(history, horizon);
+  const weekday = trimmedWeekdayAverage(history, horizon, 12);
+  const annualWeight = horizon >= 90 ? 0.4 : 0.2;
+  const calendarWeight = horizon >= 90 ? 0.4 : 0.55;
+  const weekdayWeight = 1 - annualWeight - calendarWeight;
+  return calendar.map((value, i) => Math.max(0, value * calendarWeight + annual[i] * annualWeight + weekday[i] * weekdayWeight));
+}
+
 const models: ForecastModel[] = [
   { name: "Seasonal naive", predict: seasonalNaive },
   { name: "Recent weekday average", predict: (history, horizon) => weekdayAverage(history, horizon, 8) },
   { name: "Robust weekday average", predict: (history, horizon) => trimmedWeekdayAverage(history, horizon, 8) },
   { name: "Trend + weekday", predict: trendWeekdayForecast },
   { name: "Calendar ridge", predict: calendarRidgeForecast },
+  { name: "Annual seasonal", predict: annualSeasonalForecast },
+  { name: "Calendar + annual blend", predict: calendarAnnualBlend },
 ];
 
 function scoreModel(name: string, actual: number[], predicted: number[], foldWapes: number[]): ModelResult {
@@ -227,12 +254,16 @@ export function buildForecast(daily: DailyPoint[], horizon: number): ForecastRes
   const absoluteResiduals = winner.residuals.map(Math.abs);
   const interval = quantile(absoluteResiduals, 0.8);
   const intervalCoverage = absoluteResiduals.filter((error) => error <= interval).length / Math.max(1, absoluteResiduals.length);
-  const points = values.map((value, i) => ({
-    date: addDays(daily.at(-1)!.date, i + 1),
-    value,
-    lower: Math.max(0, value - interval),
-    upper: value + interval,
-  }));
+  const points = values.map((value, i) => {
+    const distanceScale = 1 + 0.6 * Math.sqrt((i + 1) / Math.max(1, horizon));
+    const widenedInterval = interval * distanceScale;
+    return {
+      date: addDays(daily.at(-1)!.date, i + 1),
+      value,
+      lower: Math.max(0, value - widenedInterval),
+      upper: value + widenedInterval,
+    };
+  });
 
   return {
     winner,

@@ -167,6 +167,8 @@ test("integrates StatsForecast and DeepSeek without exposing raw rows or secrets
   assert.match(service, /AutoARIMA/);
   assert.match(service, /AutoETS/);
   assert.match(service, /DynamicOptimizedTheta/);
+  assert.match(service, /HybridDynamicAnnual/);
+  assert.match(service, /distance_scale/);
   assert.match(service, /cross_validation/);
   assert.match(remoteForecast, /daily\.map\(\(\{ date, sales \}\)/);
   assert.match(remoteForecast, /75_000/);

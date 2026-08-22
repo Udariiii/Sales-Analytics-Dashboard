@@ -41,6 +41,9 @@ function fullDate(date: string) { return new Date(`${date}T00:00:00Z`).toLocaleD
 function friendlyModelName(name: string) {
   const normalized = name.toLowerCase();
   if (normalized.includes("calendar ridge")) return "Sales trend and calendar pattern";
+  if (normalized.includes("annual seasonal") || normalized.includes("yearly sales")) return "Last year adjusted to today";
+  if (normalized.includes("calendar + annual") || normalized.includes("calendar and yearly")) return "Calendar and yearly sales pattern";
+  if (normalized.includes("weekly and yearly")) return "Trend, weekly and yearly pattern";
   if (normalized.includes("seasonal naive")) return "Recent weekly pattern";
   if (normalized.includes("recent weekday")) return "Recent weekday pattern";
   if (normalized.includes("robust weekday")) return "Stable weekday pattern";
