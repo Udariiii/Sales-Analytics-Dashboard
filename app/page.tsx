@@ -67,7 +67,7 @@ function LineChart({ historical, forecast, mode }: { historical: DailyPoint[]; f
     const width = canvas.clientWidth, height = canvas.clientHeight;
     canvas.width = width * ratio; canvas.height = height * ratio;
     const ctx = canvas.getContext("2d"); if (!ctx) return;
-    ctx.scale(ratio, ratio); ctx.clearRect(0, 0, width, height);
+    ctx.scale(ratio, ratio);
     const pad = { l: 52, r: 18, t: 18, b: 34 };
     const history = mode === "history" ? historical : historical.slice(-60);
     const values = [...history.map((d) => d.sales), ...forecast.map((d) => d.value)];
@@ -75,35 +75,66 @@ function LineChart({ historical, forecast, mode }: { historical: DailyPoint[]; f
     const count = Math.max(2, values.length);
     const x = (i: number) => pad.l + i * (width - pad.l - pad.r) / (count - 1);
     const y = (v: number) => height - pad.b - (v - min) * (height - pad.t - pad.b) / Math.max(1, max - min);
-    ctx.font = "11px Arial"; ctx.fillStyle = "#718096"; ctx.strokeStyle = "#E2E8F0"; ctx.lineWidth = 1;
-    for (let i = 0; i <= 4; i++) {
-      const value = max * i / 4, yy = y(value);
-      ctx.beginPath(); ctx.moveTo(pad.l, yy); ctx.lineTo(width - pad.r, yy); ctx.stroke();
-      ctx.fillText(compact.format(value), 5, yy + 4);
-    }
     const draw = (vals: number[], offset: number, color: string, dashed = false) => {
       ctx.beginPath(); ctx.strokeStyle = color; ctx.lineWidth = 2.5; ctx.setLineDash(dashed ? [6, 5] : []);
       vals.forEach((v, i) => { const xx = x(i + offset), yy = y(v); if (i) ctx.lineTo(xx, yy); else ctx.moveTo(xx, yy); });
       ctx.stroke(); ctx.setLineDash([]);
     };
-    draw(history.map((d) => d.sales), 0, "#13A6A0");
-    if (forecast.length) {
-      const offset = history.length - 1;
-      const joined = [history.at(-1)!.sales, ...forecast.map((d) => d.value)];
-      ctx.beginPath();
-      forecast.forEach((d, i) => { const xx = x(offset + i + 1), yy = y(d.upper); if (i) ctx.lineTo(xx, yy); else ctx.moveTo(xx, yy); });
-      [...forecast].reverse().forEach((d, reverseIndex) => { const i = forecast.length - 1 - reverseIndex; ctx.lineTo(x(offset + i + 1), y(d.lower)); });
-      ctx.closePath(); ctx.fillStyle = "rgba(244,185,66,.2)"; ctx.fill();
-      draw(joined, offset, "#E59C16", true);
-      ctx.strokeStyle = "#C8D1DC"; ctx.beginPath(); ctx.moveTo(x(offset), pad.t); ctx.lineTo(x(offset), height - pad.b); ctx.stroke();
-    }
     const labels = mode === "history" ? [history[0]?.date, history[Math.floor(history.length / 2)]?.date, history.at(-1)?.date] : [history[0]?.date, history.at(-1)?.date, forecast.at(-1)?.date];
-    ctx.fillStyle = "#718096"; ctx.textAlign = "center";
-    labels.forEach((label, i) => { if (label) ctx.fillText(shortDate(label), pad.l + i * (width - pad.l - pad.r) / 2, height - 10); });
+    const allValues = [...history.map((d) => d.sales), ...forecast.map((d) => d.value)];
+    const render = (progress: number) => {
+      ctx.clearRect(0, 0, width, height);
+      ctx.font = "11px Segoe UI, Arial"; ctx.textAlign = "left"; ctx.fillStyle = "#718096"; ctx.strokeStyle = "#E2E8F0"; ctx.lineWidth = 1;
+      for (let i = 0; i <= 4; i++) {
+        const value = max * i / 4, yy = y(value);
+        ctx.beginPath(); ctx.moveTo(pad.l, yy); ctx.lineTo(width - pad.r, yy); ctx.stroke();
+        ctx.fillText(compact.format(value), 5, yy + 4);
+      }
+
+      ctx.save();
+      ctx.beginPath(); ctx.rect(pad.l - 4, pad.t - 4, (width - pad.l - pad.r + 8) * progress, height - pad.t - pad.b + 8); ctx.clip();
+      draw(history.map((d) => d.sales), 0, "#0C9B8E");
+      if (forecast.length) {
+        const offset = history.length - 1;
+        const joined = [history.at(-1)!.sales, ...forecast.map((d) => d.value)];
+        ctx.beginPath();
+        forecast.forEach((d, i) => { const xx = x(offset + i + 1), yy = y(d.upper); if (i) ctx.lineTo(xx, yy); else ctx.moveTo(xx, yy); });
+        [...forecast].reverse().forEach((d, reverseIndex) => { const i = forecast.length - 1 - reverseIndex; ctx.lineTo(x(offset + i + 1), y(d.lower)); });
+        ctx.closePath(); ctx.fillStyle = "rgba(245,185,64,.18)"; ctx.fill();
+        draw(joined, offset, "#D99518", true);
+        ctx.strokeStyle = "#AAB9C5"; ctx.beginPath(); ctx.moveTo(x(offset), pad.t); ctx.lineTo(x(offset), height - pad.b); ctx.stroke();
+      }
+      ctx.restore();
+
+      if (allValues.length > 1 && progress > 0.02) {
+        const position = (allValues.length - 1) * progress;
+        const left = Math.floor(position), right = Math.min(allValues.length - 1, left + 1), fraction = position - left;
+        const markerValue = allValues[left] + (allValues[right] - allValues[left]) * fraction;
+        ctx.beginPath(); ctx.arc(x(position), y(markerValue), 4, 0, Math.PI * 2);
+        ctx.fillStyle = position < history.length - 1 ? "#0C9B8E" : "#D99518"; ctx.fill();
+        ctx.lineWidth = 2; ctx.strokeStyle = "#FFFFFF"; ctx.stroke();
+      }
+
+      ctx.fillStyle = "#718096"; ctx.textAlign = "center";
+      labels.forEach((label, i) => { if (label) ctx.fillText(shortDate(label), pad.l + i * (width - pad.l - pad.r) / 2, height - 10); });
+    };
+
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let animationFrame = 0;
+    if (reducedMotion) render(1);
+    else {
+      const startedAt = performance.now();
+      const animate = (time: number) => {
+        const elapsed = Math.min(1, (time - startedAt) / 900);
+        render(1 - Math.pow(1 - elapsed, 3));
+        if (elapsed < 1) animationFrame = requestAnimationFrame(animate);
+      };
+      animationFrame = requestAnimationFrame(animate);
+    }
+    return () => cancelAnimationFrame(animationFrame);
   }, [historical, forecast, mode]);
   return <canvas ref={ref} className="line-canvas" aria-label={mode === "forecast" ? "Historical and forecast sales line chart" : "Historical daily sales line chart"} />;
 }
-
 function Icon({ children }: { children: React.ReactNode }) { return <span className="icon" aria-hidden="true">{children}</span>; }
 
 type DeepSeekInsight = { headline: string; summary: string; actions: string[]; risks: string[] };
