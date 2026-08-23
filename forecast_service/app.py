@@ -134,7 +134,7 @@ def run_forecast(points: list[DailySale], horizon: int) -> dict:
 
     minimum_train = 84
     available_windows = max(1, (len(frame) - minimum_train) // horizon)
-    folds = min(8, available_windows)
+    folds = min(4, available_windows)
     if folds < 3:
         raise HTTPException(status_code=422, detail="At least three historical test windows are required.")
 
@@ -240,7 +240,9 @@ app.add_middleware(
 
 
 @app.get("/health")
-def health():
+async def health():
+    # Keep this on the event loop so Render can check availability while a
+    # CPU-heavy forecast runs in FastAPI's worker thread.
     return {"status": "ok", "engine": "StatsForecast"}
 
 
