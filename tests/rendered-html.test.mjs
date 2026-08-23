@@ -160,7 +160,7 @@ test("integrates StatsForecast and DeepSeek without exposing raw rows or secrets
   ]);
 
   assert.match(page, />3 months</);
-  assert.match(page, />6 months</);
+  assert.doesNotMatch(page, />6 months</);
   assert.match(page, /AI BUSINESS ADVISER/);
   assert.match(page, /Explain this forecast/);
   assert.doesNotMatch(page, /<span>Confidence<\/span>/);
