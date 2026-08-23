@@ -57,7 +57,7 @@ test("includes flexible local-AI importing and rolling predictive analysis", asy
   assert.match(forecastModule, /Calendar ridge/);
   assert.match(forecastModule, /Robust weekday average/);
   assert.match(forecastModule, /folds\.length < 8/);
-  assert.match(page, /WAPE/);
+  assert.doesNotMatch(page, /WAPE/);
   assert.match(layout, /og\.png/);
   assert.match(packageJson, /@huggingface\/transformers/);
   assert.match(packageJson, /read-excel-file/);
@@ -164,10 +164,10 @@ test("integrates StatsForecast and DeepSeek without exposing raw rows or secrets
   assert.match(page, /AI BUSINESS ADVISER/);
   assert.match(page, /Explain this forecast/);
   assert.doesNotMatch(page, /<span>Confidence<\/span>/);
-  assert.match(service, /AutoARIMA/);
   assert.match(service, /AutoETS/);
-  assert.match(service, /DynamicOptimizedTheta/);
-  assert.match(service, /HybridDynamicAnnual/);
+  assert.match(service, /SeasonalNaive/);
+  assert.match(service, /CalendarBlend/);
+  assert.doesNotMatch(service, /AutoARIMA|DynamicOptimizedTheta|HybridDynamicAnnual/);
   assert.match(service, /distance_scale/);
   assert.match(service, /cross_validation/);
   assert.match(remoteForecast, /daily\.map\(\(\{ date, sales \}\)/);

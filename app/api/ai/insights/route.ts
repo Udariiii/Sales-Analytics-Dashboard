@@ -22,7 +22,7 @@ export async function POST(request: Request) {
       messages: [
         {
           role: "system",
-          content: 'You are a careful retail sales analyst. Use only the verified metrics supplied. Do not calculate new forecast values, invent causes, or claim causation. Return only JSON in exactly this shape: {"headline":"...","summary":"...","actions":["...","..."],"risks":["..."]}. Mention forecast uncertainty in plain language.',
+          content: 'Write for a small-business owner with no analytics knowledge. Use only the supplied facts. Never use statistical or model terms such as WAPE, MAE, bias, confidence interval, model, or algorithm. The headline must be under 12 words. The summary must be 1-2 short sentences explaining what may happen to sales and the most important business implication. Give 2-3 specific, practical actions that begin with a verb. Give at most one simple thing to check. Do not invent causes or new numbers. Return only JSON in exactly this shape: {"headline":"...","summary":"...","actions":["...","..."],"risks":["..."]}.',
         },
         { role: "user", content: serialized },
       ],

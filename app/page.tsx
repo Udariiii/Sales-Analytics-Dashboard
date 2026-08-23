@@ -436,14 +436,11 @@ export default function Home() {
           history: { days: dataProfile.historyDays, zeroDays: dataProfile.zeroDays, unusualDays: dataProfile.unusualDays },
           forecast: {
             horizonDays: forecastDays,
-            model: forecast.winner.name,
-            engine: forecast.engine,
             total: futureTotal,
             changeFromPreviousPeriod: forecastChange,
-            wape: forecast.winner.wape,
-            mae: forecast.winner.mae,
-            bias: forecast.winner.bias,
-            intervalCoverage: forecast.intervalCoverage,
+            typicalPastDifferencePercent: Math.round(forecast.winner.wape * 1000) / 10,
+            typicalDailyDifference: Math.round(forecast.winner.mae),
+            usualEstimateDifferencePercent: Math.round(forecast.winner.bias * 1000) / 10,
           },
           currentSales: metrics.net,
           topCategories: categorySales.slice(0, 5).map(([name, sales]) => ({ name, sales })),
@@ -489,7 +486,7 @@ export default function Home() {
           <div className="upload-requirements">
             <div><strong>Accepted formats</strong><span>CSV, TSV and Excel XLSX · multiple worksheets supported</span></div>
             <div><strong>Minimum information</strong><span>A date column and a sales or revenue amount</span></div>
-            <div><strong>Private local AI</strong><span>Mapping runs in your browser; sales rows are not sent to an AI provider</span></div>
+            <div><strong>Private local AI</strong><span>It understands which spreadsheet columns contain dates, sales and product details without sending your sales rows to an AI provider.</span></div>
           </div>
         </section>
         <footer><span>RetailPulse · Sales intelligence for SMEs</span><span>Your file stays private in this browser.</span></footer>
@@ -523,7 +520,7 @@ export default function Home() {
         {error && <div className="error-banner"><strong>File issue</strong><span>{error}</span></div>}
         {uploadNotice && <div className="upload-success" role="status" data-testid="upload-status"><span className="success-check">✓</span><div><strong>Upload complete</strong><span>{uploadNotice}</span></div><button aria-label="Dismiss upload message" onClick={() => setUploadNotice("")}>×</button></div>}
 
-        {section !== "methodology" && <div className="filterbar">
+        {section !== "methodology" && section !== "forecast" && <div className="filterbar">
           {capabilities.category && <label>Category<select value={category} onChange={(e) => setCategory(e.target.value)}>{categories.map((c) => <option key={c}>{c}</option>)}</select></label>}
           <label>Show results for<select value={period} onChange={(e) => setPeriod(e.target.value)}><option value="Full year">All available data</option><option value="Last 90 days">Last 90 days</option><option value="Last 30 days">Last 30 days</option></select></label>
           <div className="filter-meta"><span>Data period</span><strong>{dailyAll[0]?.date} — {dailyAll.at(-1)?.date}</strong></div>
@@ -579,10 +576,10 @@ export default function Home() {
         </section>}
 
         {section === "methodology" && <section className="methodology">
-          <div className="method-intro"><p className="eyebrow">CLEAR AND HONEST</p><h2>How RetailPulse creates your forecast</h2><p>You do not need to choose a statistical model. RetailPulse checks the options, shows how close they were on past sales, and explains the result in everyday language.</p></div>
+          <div className="method-intro"><h2>How RetailPulse creates your forecast</h2><p>You do not need to choose a statistical model. RetailPulse checks the options, shows how close they were on past sales, and explains the result in everyday language.</p></div>
           <div className="method-flow"><article><span>1</span><div><h3>Understand your spreadsheet</h3><p>RetailPulse automatically finds the date, sales and other useful columns in your file.</p></div></article><article><span>2</span><div><h3>Check the information</h3><p>Invalid dates and sales values are skipped, and missing financial figures are never invented.</p></div></article><article><span>3</span><div><h3>Find what works best</h3><p>Several forecasting approaches are tried on older parts of your own sales history. The approach that came closest is used.</p></div></article><article><span>4</span><div><h3>Turn the result into action</h3><p>The forecast provides the numbers. DeepSeek can then explain them and suggest practical questions or actions.</p></div></article></div>
           <div className="method-cards"><article><p>CHECKED ON YOUR HISTORY</p><strong>Past performance first</strong><span>The dashboard tests each approach on sales it already knows, before using it for the future.</span></article><article><p>NO MADE-UP NUMBERS</p><strong>Calculations stay separate from AI</strong><span>The forecast engine calculates the estimate. AI only explains verified results.</span></article><article><p>PRIVATE BY DESIGN</p><strong>Your raw rows stay local</strong><span>Your spreadsheet is read in this browser and is not uploaded to DeepSeek.</span></article></div>
-          <details className="technical-details"><summary>Technical details for reviewers</summary><p>Forecasts compare local calendar and weekday approaches with StatsForecast AutoETS, AutoARIMA and Theta candidates. Selection uses rolling historical tests and WAPE; lower values mean smaller past differences.</p></details>
+          <details className="technical-details"><summary>Technical details for reviewers</summary><p>Forecasts compare weekly sales, AutoETS, and calendar/yearly patterns. The option with the smallest difference across three historical checks is selected.</p></details>
           <div className="disclosure"><strong>How your data is used</strong><p>Your spreadsheet rows are processed in this browser and are not retained. Only daily date-and-sales totals go to the forecasting service. DeepSeek receives a short summary only when you click “Explain this forecast.”</p></div>
         </section>}
         <footer><span>RetailPulse · Sales intelligence for SMEs</span><span>Use forecasts as a planning guide alongside your business knowledge.</span></footer>
