@@ -11,18 +11,13 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from statsforecast import StatsForecast
-from statsforecast.models import AutoARIMA, AutoETS, AutoTheta, DynamicOptimizedTheta, SeasonalNaive
+from statsforecast.models import AutoETS, SeasonalNaive
 
 
 MODEL_LABELS = {
-    "AutoARIMA": "AutoARIMA",
-    "AutoETS": "AutoETS",
-    "AutoTheta": "AutoTheta",
-    "DynamicOptimizedTheta": "Dynamic optimized Theta",
-    "SeasonalNaive": "Seasonal naive",
-    "AnnualSeasonal": "Yearly sales pattern",
+    "AutoETS": "Sales level and weekly pattern",
+    "SeasonalNaive": "Weekly sales pattern",
     "CalendarBlend": "Calendar and yearly pattern",
-    "HybridDynamicAnnual": "Trend, weekly and yearly pattern",
 }
 
 FORECAST_CACHE: dict[str, dict] = {}
@@ -45,9 +40,6 @@ def _models():
     return [
         SeasonalNaive(season_length=7),
         AutoETS(season_length=7),
-        AutoARIMA(season_length=7),
-        AutoTheta(season_length=7),
-        DynamicOptimizedTheta(season_length=7),
     ]
 
 
@@ -117,10 +109,7 @@ def _custom_forecasts(train: pd.DataFrame, future_dates: pd.Series) -> dict[str,
     horizon = len(future_dates)
     annual_weight = 0.4 if horizon >= 90 else 0.2
     calendar_weight = 0.6 if horizon >= 90 else 0.8
-    return {
-        "AnnualSeasonal": annual,
-        "CalendarBlend": np.maximum(0.0, calendar * calendar_weight + annual * annual_weight),
-    }
+    return {"CalendarBlend": np.maximum(0.0, calendar * calendar_weight + annual * annual_weight)}
 
 
 def run_forecast(points: list[DailySale], horizon: int) -> dict:
@@ -134,7 +123,7 @@ def run_forecast(points: list[DailySale], horizon: int) -> dict:
 
     minimum_train = 84
     available_windows = max(1, (len(frame) - minimum_train) // horizon)
-    folds = min(4, available_windows)
+    folds = min(3, available_windows)
     if folds < 3:
         raise HTTPException(status_code=422, detail="At least three historical test windows are required.")
 
@@ -145,17 +134,13 @@ def run_forecast(points: list[DailySale], horizon: int) -> dict:
         n_windows=folds,
         step_size=horizon,
     )
-    for key in ("AnnualSeasonal", "CalendarBlend"):
+    for key in ("CalendarBlend",):
         cross_validation[key] = np.nan
     for cutoff, group in cross_validation.groupby("cutoff", sort=False):
         train = frame[frame["ds"] <= cutoff]
         custom = _custom_forecasts(train, group["ds"])
         for key, values in custom.items():
             cross_validation.loc[group.index, key] = values
-    cross_validation["HybridDynamicAnnual"] = (
-        cross_validation["DynamicOptimizedTheta"] * 0.75 + cross_validation["CalendarBlend"] * 0.25
-    )
-
     actual = cross_validation["y"].to_numpy(dtype=float)
     actual_total = max(1.0, float(np.abs(actual).sum()))
     results = []
@@ -179,16 +164,11 @@ def run_forecast(points: list[DailySale], horizon: int) -> dict:
 
     results.sort(key=lambda item: item["wape"])
     winner = results[0]
-    if horizon >= 90:
-        multi_seasonal = next(item for item in results if item["key"] == "HybridDynamicAnnual")
-        if multi_seasonal["wape"] <= winner["wape"] + 0.005:
-            winner = multi_seasonal
     baseline = next(item for item in results if item["key"] == "SeasonalNaive")
     future = engine.forecast(df=frame, h=horizon)
     custom_future = _custom_forecasts(frame, future["ds"])
     for key, values_out in custom_future.items():
         future[key] = values_out
-    future["HybridDynamicAnnual"] = future["DynamicOptimizedTheta"] * 0.75 + future["CalendarBlend"] * 0.25
     values = future[winner["key"]].to_numpy(dtype=float)
     absolute_residuals = np.abs(residuals_by_model[winner["key"]])
     interval = float(np.quantile(absolute_residuals, 0.80))
