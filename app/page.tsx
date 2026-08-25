@@ -231,7 +231,6 @@ export default function Home() {
   const [importReport, setImportReport] = useState<ImportReport | null>(null);
   const [statsForecast, setStatsForecast] = useState<ForecastResult | null>(null);
   const [forecastServiceState, setForecastServiceState] = useState<"idle" | "loading" | "ready" | "setup" | "fallback">("idle");
-  const [forecastServiceMessage, setForecastServiceMessage] = useState("");
   const [deepSeekInsight, setDeepSeekInsight] = useState<DeepSeekInsight | null>(null);
   const [deepSeekState, setDeepSeekState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [deepSeekMessage, setDeepSeekMessage] = useState("");
@@ -280,7 +279,6 @@ export default function Home() {
       }
       setStatsForecast(null);
       setForecastServiceState("idle");
-      setForecastServiceMessage("");
       setRows(applied.rows);
       setImportReport(applied.report);
       setFileName(file.name);
@@ -320,27 +318,22 @@ export default function Home() {
     setDeepSeekMessage("");
     if (!localForecast) {
       setForecastServiceState("idle");
-      setForecastServiceMessage("");
       return;
     }
     if (!forecastApiConfigured) {
       setForecastServiceState("setup");
-      setForecastServiceMessage("The advanced forecasting engine is not connected, so the quick backup forecast is shown.");
       return;
     }
     const controller = new AbortController();
     setForecastServiceState("loading");
-    setForecastServiceMessage("The advanced forecasting engine is checking your sales history.");
     requestStatsForecast(dailyAll, forecastDays, controller.signal)
       .then((result) => {
         setStatsForecast(result);
         setForecastServiceState("ready");
-        setForecastServiceMessage("The advanced forecasting engine checked several approaches against past sales. Its best-performing estimate is now shown.");
       })
       .catch((forecastError) => {
         if (forecastError instanceof DOMException && forecastError.name === "AbortError") return;
         setForecastServiceState("fallback");
-        setForecastServiceMessage(forecastError instanceof Error ? forecastError.message : "The advanced forecast is unavailable, so the quick backup forecast is shown.");
       });
     return () => controller.abort();
   }, [dailyAll, forecastDays, localForecast, forecastApiConfigured]);
@@ -410,7 +403,7 @@ export default function Home() {
   const forecastChange = previousComparable ? futureTotal / previousComparable - 1 : 0;
   const comparedModels = forecast ? [...forecast.models.slice(0, 3), ...(forecast.models.slice(0, 3).some((model) => model.name === "Seasonal naive") ? [] : [forecast.baseline])] : [];
   const maxComparedWape = Math.max(...comparedModels.map((model) => model.wape), 0.01);
-  const cautiousForecast = forecast?.confidence === "Low" || forecast?.confidence === "Very low";
+  const showForecastWarning = Boolean(forecast && forecast.winner.wape > 0.2);
   const topGrowth = [...categoryForecasts].sort((a, b) => b.change - a.change)[0];
   const topCategory = categorySales[0];
   const maxCategory = categorySales[0]?.[1] || 1;
@@ -611,8 +604,7 @@ export default function Home() {
             {horizonSelector}
           </section>
           {businessAdviser}
-          <div className={`service-status is-${forecastServiceState}`} role="status"><strong>{quickFallbackActive ? "Quick backup forecast" : "Advanced forecast ready"}</strong><span>{forecastServiceMessage || "The estimate with the smallest past difference is shown."}</span></div>
-          <div className={`forecast-confidence ${forecast.confidence.toLowerCase().replace(" ", "-")}`} role="status"><strong>{cautiousForecast ? "Use with care" : "Useful for planning"}</strong><span>When tested on past sales, estimates typically differed by about {pct(forecast.winner.wape)}. {cautiousForecast ? "Plan using the shaded range, not only the centre number." : "Use this with what you know about upcoming promotions, holidays and stock changes."}</span></div>
+          {showForecastWarning && <div className="forecast-confidence low" role="status"><strong>Use with care</strong><span>When tested on past sales, estimates typically differed by about {pct(forecast.winner.wape)}. Plan using the shaded range, not only the centre number.</span></div>}
           <section className="dashboard-grid forecast-grid">
             <article className="panel span-2"><div className="panel-head"><div><p>WHAT MAY HAPPEN NEXT</p><h2>Past sales and expected future sales</h2></div><div className="two-legends"><span className="legend"><i />Past sales</span><span className="legend forecast"><i />Expected sales range</span></div></div><LineChart historical={dailyAll} forecast={forecast.points} mode="forecast" currency={currency} /></article>
             <article className="panel accuracy-card"><div className="panel-head"><div><p>HOW RELIABLE IS IT?</p><h2>How close past estimates were</h2></div></div><div className="accuracy-score"><strong>{pct(forecast.winner.wape)}</strong><span>Typical past difference · lower is better</span></div><dl><div><dt>Chosen approach</dt><dd>{friendlyModelName(forecast.winner.name)}</dd></div><div><dt>Typical daily difference</dt><dd>±{money.format(forecast.winner.mae)}</dd></div></dl></article>
