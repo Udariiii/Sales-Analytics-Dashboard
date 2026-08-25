@@ -4,7 +4,7 @@ export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   const apiKey = process.env.DEEPSEEK_API_KEY;
-  if (!apiKey) return NextResponse.json({ error: "DeepSeek is not configured yet." }, { status: 503 });
+  if (!apiKey) return NextResponse.json({ error: "AI is not configured yet." }, { status: 503 });
 
   const input = await request.json().catch(() => null);
   const serialized = JSON.stringify(input);
@@ -30,7 +30,7 @@ export async function POST(request: Request) {
   });
 
   const body = await response.json().catch(() => null);
-  if (!response.ok) return NextResponse.json({ error: body?.error?.message || "DeepSeek analysis failed." }, { status: 502 });
+  if (!response.ok) return NextResponse.json({ error: body?.error?.message || "AI analysis failed." }, { status: 502 });
   try {
     const content = body?.choices?.[0]?.message?.content;
     if (typeof content !== "string" || !content.trim()) throw new Error("Empty response");
@@ -51,6 +51,6 @@ export async function POST(request: Request) {
       risks: result.risks.filter((item: unknown) => typeof item === "string").slice(0, 2),
     });
   } catch {
-    return NextResponse.json({ error: "DeepSeek returned an invalid analysis response." }, { status: 502 });
+    return NextResponse.json({ error: "AI returned an invalid analysis response." }, { status: 502 });
   }
 }

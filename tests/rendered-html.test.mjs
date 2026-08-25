@@ -24,6 +24,8 @@ test("server-renders the RetailPulse authentication shell", async () => {
   const html = await response.text();
   assert.match(html, /<title>RetailPulse AI \| SME Sales Intelligence<\/title>/i);
   assert.match(html, /Sign in to your workspace/);
+  assert.match(html, /Turn Your Sales Data Into Smarter Decisions/);
+  assert.doesNotMatch(html, /PRIVATE SALES WORKSPACE|Your data stays in your browser/);
   assert.match(html, /Continue with Google/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/);
 });
@@ -52,7 +54,9 @@ test("includes flexible local-AI importing and rolling predictive analysis", asy
   assert.match(page, /window\.setTimeout\(\(\) => setUploadNotice\(""\), 4_500\)/);
   assert.doesNotMatch(page, /SIMPLE NEXT STEPS|Made for business owners|Technical details for reviewers/);
   assert.match(page, /input\.value = ""/);
-  assert.match(page, /YOUR SALES FORECAST/);
+  assert.doesNotMatch(page, /YOUR SALES FORECAST/);
+  assert.match(page, /SALES DASHBOARD/);
+  assert.doesNotMatch(page, /RetailPulse · Sales intelligence for SMEs|Use forecasts as a planning guide alongside your business knowledge/);
   assert.match(page, /Forecast accuracy on past sales/);
   assert.match(page, /Math\.max\(0, 1 - forecast\.winner\.wape\)/);
   assert.match(page, /Typical difference from past sales/);
@@ -169,8 +173,9 @@ test("integrates StatsForecast and DeepSeek without exposing raw rows or secrets
 
   assert.match(page, />3 months</);
   assert.doesNotMatch(page, />6 months</);
-  assert.match(page, /AI BUSINESS ADVISER/);
-  assert.match(page, /Summarise my business/);
+  assert.match(page, /AI EXECUTIVE SUMMARY/);
+  assert.match(page, /"Analyze"/);
+  assert.doesNotMatch(page, /AI BUSINESS ADVISER|Summarise my business|DeepSeek reviews|uploaded to DeepSeek/);
   assert.match(page, /businessSnapshot/);
   assert.match(page, /Business highlights/);
   assert.match(page, /For more reliable forecasts/);

@@ -410,7 +410,6 @@ export default function Home() {
   const maxComparedWape = Math.max(...comparedModels.map((model) => model.wape), 0.01);
   const showForecastWarning = Boolean(forecast && forecast.winner.wape > 0.2);
   const forecastAccuracy = forecast ? Math.max(0, 1 - forecast.winner.wape) : 0;
-  const topGrowth = [...categoryForecasts].sort((a, b) => b.change - a.change)[0];
   const topCategory = categorySales[0];
   const maxCategory = categorySales[0]?.[1] || 1;
   const maxProduct = productSales[0]?.[1] || 1;
@@ -486,18 +485,18 @@ export default function Home() {
         }),
       });
       const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body.error || "DeepSeek analysis failed.");
+      if (!response.ok) throw new Error(body.error || "AI analysis failed.");
       setDeepSeekInsight(body as DeepSeekInsight);
       setDeepSeekState("ready");
     } catch (insightError) {
       setDeepSeekState("error");
-      setDeepSeekMessage(insightError instanceof Error ? insightError.message : "DeepSeek analysis failed.");
+      setDeepSeekMessage(insightError instanceof Error ? insightError.message : "AI analysis failed.");
     }
   };
 
   const horizonSelector = <div className="horizon-toggle" aria-label="Forecast horizon"><button className={forecastDays === 7 ? "active" : ""} onClick={() => setForecastDays(7)}>7 days</button><button className={forecastDays === 30 ? "active" : ""} onClick={() => setForecastDays(30)}>30 days</button><button className={forecastDays === 90 ? "active" : ""} onClick={() => setForecastDays(90)}>3 months</button></div>;
 
-  const businessAdviser = <article className="panel executive-card"><div className="executive-label"><span>AI</span>AI BUSINESS ADVISER</div>{deepSeekInsight ? <><h2>{deepSeekInsight.headline}</h2><p>{deepSeekInsight.summary}</p>{deepSeekInsight.highlights.length > 0 && <div className="ai-recommendations"><strong>Business highlights</strong><ul>{deepSeekInsight.highlights.map((highlight) => <li key={highlight}>{highlight}</li>)}</ul></div>}<div className="ai-recommendations"><strong>Recommended actions</strong><ul>{deepSeekInsight.actions.map((action) => <li key={action}>{action}</li>)}</ul></div>{deepSeekInsight.risks.length > 0 && <div className="summary-action"><strong>Things to check</strong><span>{deepSeekInsight.risks.join(" ")}</span></div>}</> : <><h2>{forecast ? "Get a clear business summary and action plan" : "Understand your current business performance"}</h2><p>{forecast ? "DeepSeek reviews the main totals and patterns found in your uploaded data, then explains what the forecast may mean for your business." : "There is not enough history for this forecast, but DeepSeek can still explain the main totals and patterns in your uploaded data."}</p>{forecast && <p>{topGrowth ? `${topGrowth.name} currently shows the strongest category growth at ${topGrowth.change >= 0 ? "+" : ""}${pct(topGrowth.change)}.` : "Category opportunities will appear when that information is available."}</p>}<button className="deepseek-button" disabled={deepSeekState === "loading"} onClick={generateDeepSeekInsight}>{deepSeekState === "loading" ? "Preparing your summary…" : "Summarise my business"}</button>{deepSeekMessage && <small className="deepseek-message">{deepSeekMessage}</small>}</>}</article>;
+  const businessAdviser = <article className="panel executive-card"><div className="executive-label">AI EXECUTIVE SUMMARY</div>{deepSeekInsight ? <><h2>{deepSeekInsight.headline}</h2><p>{deepSeekInsight.summary}</p>{deepSeekInsight.highlights.length > 0 && <div className="ai-recommendations"><strong>Business highlights</strong><ul>{deepSeekInsight.highlights.map((highlight) => <li key={highlight}>{highlight}</li>)}</ul></div>}<div className="ai-recommendations"><strong>Recommended actions</strong><ul>{deepSeekInsight.actions.map((action) => <li key={action}>{action}</li>)}</ul></div>{deepSeekInsight.risks.length > 0 && <div className="summary-action"><strong>Things to check</strong><span>{deepSeekInsight.risks.join(" ")}</span></div>}</> : <><h2>{forecast ? "Get a clear business summary and action plan" : "Understand your current business performance"}</h2><p>{forecast ? "AI reviews the main totals and patterns found in your uploaded data, then explains what the forecast may mean for your business." : "There is not enough history for this forecast, but AI can still explain the main totals and patterns in your uploaded data."}</p><button className="deepseek-button" disabled={deepSeekState === "loading"} onClick={generateDeepSeekInsight}>{deepSeekState === "loading" ? "Preparing your summary…" : "Analyze"}</button>{deepSeekMessage && <small className="deepseek-message">{deepSeekMessage}</small>}</>}</article>;
 
   if (loading) return <main className="app-loading"><div className="loading-mark">RP</div><h1>Preparing your dashboard</h1><p>{loadingMessage}</p><div className="loader"><span /></div><small>This usually takes less than a minute on first use.</small></main>;
 
@@ -507,32 +506,29 @@ export default function Home() {
         <div className="brand"><div className="brand-mark">RP</div><div><strong>RetailPulse</strong><span>AI Sales Intelligence</span></div></div>
         <nav aria-label="Dashboard sections">
           <button className="active"><Icon>⌂</Icon>Get started</button>
-          <button disabled><Icon>↗</Icon>Sales forecast</button>
-          <button disabled><Icon>▦</Icon>What sells best</button>
-          <button disabled><Icon>◎</Icon>How it works</button>
+          <button disabled><Icon>↗</Icon>Sales Forecast</button>
+          <button disabled><Icon>▦</Icon>What Sells Best</button>
+          <button disabled><Icon>◎</Icon>How It Works</button>
         </nav>
-        <div className="sidebar-note"><span>Private workspace</span><p>Your uploaded file is processed locally in this browser.</p></div>
+
       </aside>
       <section className="workspace">
         <header className="topbar">
-          <div><p className="eyebrow">YOUR BUSINESS DASHBOARD</p><h1>Turn sales data into clear decisions</h1></div>
+          <div><p className="eyebrow">SALES DASHBOARD</p><h1>Understand your sales at a glance</h1></div>
           <AccountMenu />
         </header>
         {error && <div className="error-banner"><strong>File issue</strong><span>{error}</span></div>}
         <section className="empty-upload">
-          <div className="empty-upload-mark" aria-hidden="true">⇧</div>
-          <p className="eyebrow">YOUR DATA, YOUR WORKSPACE</p>
-          <h2>Upload almost any sales spreadsheet</h2>
-          <p>Choose your file and RetailPulse will automatically understand it, check it, and take you straight to the insights your business can use.</p>
+          <h2>Upload your sales data</h2>
+          <p>Uploaded files are processed locally in your browser and are not stored by RetailPulse.</p>
           <div className="upload-history-tip"><strong>For more reliable forecasts</strong><span>Upload the longest complete sales history you have. You need at least 105 days for a 7-day forecast, 174 days for 30 days, and 450 days for 3 months. Longer, consistent history usually improves reliability.</span></div>
           <label className="upload-button upload-primary">Choose sales file<input aria-label="Upload sales data file" type="file" accept=".csv,.tsv,.txt,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={upload} /></label>
           <div className="upload-requirements">
-            <div><strong>Accepted formats</strong><span>CSV, TSV and Excel XLSX · multiple worksheets supported</span></div>
+            <div><strong>Accepted formats</strong><span>CSV and Excel XLSX files. Multiple worksheets are supported.</span></div>
             <div><strong>Minimum information</strong><span>A date column and a sales or revenue amount</span></div>
             <div><strong>Private local AI</strong><span>It understands which spreadsheet columns contain dates, sales and product details without sending your sales rows to an AI provider.</span></div>
           </div>
         </section>
-        <footer><span>RetailPulse · Sales intelligence for SMEs</span><span>Your file stays private in this browser.</span></footer>
       </section>
     </main>
   );
@@ -543,16 +539,16 @@ export default function Home() {
         <div className="brand"><div className="brand-mark">RP</div><div><strong>RetailPulse</strong><span>AI Sales Intelligence</span></div></div>
         <nav aria-label="Dashboard sections">
           <button className={section === "overview" ? "active" : ""} onClick={() => setSection("overview")}><Icon>⌂</Icon>Overview</button>
-          <button className={section === "forecast" ? "active" : ""} onClick={() => setSection("forecast")}><Icon>↗</Icon>Sales forecast</button>
-          <button disabled={!capabilities.product && !capabilities.category} className={section === "products" ? "active" : ""} onClick={() => setSection("products")}><Icon>▦</Icon>What sells best</button>
-          <button className={section === "methodology" ? "active" : ""} onClick={() => setSection("methodology")}><Icon>◎</Icon>How it works</button>
+          <button className={section === "forecast" ? "active" : ""} onClick={() => setSection("forecast")}><Icon>↗</Icon>Sales Forecast</button>
+          <button disabled={!capabilities.product && !capabilities.category} className={section === "products" ? "active" : ""} onClick={() => setSection("products")}><Icon>▦</Icon>What Sells Best</button>
+          <button className={section === "methodology" ? "active" : ""} onClick={() => setSection("methodology")}><Icon>◎</Icon>How It Works</button>
         </nav>
 
       </aside>
 
       <section className="workspace">
         <header className="topbar">
-          <div><p className="eyebrow">YOUR BUSINESS DASHBOARD</p><h1>{section === "overview" ? "Your business at a glance" : section === "forecast" ? "Plan your next sales period" : section === "products" ? "See what drives your sales" : "How your forecast works"}</h1></div>
+          <div><p className="eyebrow">SALES DASHBOARD</p><h1>{section === "overview" ? "Your business at a glance" : section === "forecast" ? "Plan your next sales period" : section === "products" ? "See what drives your sales" : "How your forecast works"}</h1></div>
           <div className="top-actions">
             <div className="data-status"><span className="status-dot" /><div><strong>{fileName}</strong><small>{number.format(rows.length)} sales records ready</small></div></div>
             <label className="upload-button">Upload new file<input aria-label="Upload sales data file" type="file" accept=".csv,.tsv,.txt,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={upload} /></label>
@@ -566,7 +562,7 @@ export default function Home() {
         {section !== "methodology" && section !== "forecast" && <div className="filterbar">
           {capabilities.category && <label>Category<select value={category} onChange={(e) => setCategory(e.target.value)}>{categories.map((c) => <option key={c}>{c}</option>)}</select></label>}
           <label>Show results for<select value={period} onChange={(e) => setPeriod(e.target.value)}><option value="Full year">All available data</option><option value="Last 90 days">Last 90 days</option><option value="Last 30 days">Last 30 days</option></select></label>
-          <div className="filter-meta"><span>Data period</span><strong>{dailyAll[0]?.date} — {dailyAll.at(-1)?.date}</strong></div>
+          <div className="filter-meta"><span>Data period</span><strong>{dailyAll[0]?.date} - {dailyAll.at(-1)?.date}</strong></div>
         </div>}
 
         {section === "overview" && <>
@@ -581,7 +577,7 @@ export default function Home() {
             <div><span>Sales records used</span><strong>{number.format(importReport.acceptedRows)}</strong></div>
             <div><span>Rows skipped</span><strong>{number.format(importReport.rejectedRows)}</strong></div>
             <div><span>Possible duplicates</span><strong>{number.format(importReport.exactDuplicateRows)}</strong></div>
-            <p>{importReport.rejectedRows || importReport.exactDuplicateRows ? "Some records may need attention before using these totals for formal accounts." : "Your data is ready — no problems found."}</p>
+            {(importReport.rejectedRows > 0 || importReport.exactDuplicateRows > 0) && <p>Some records may need attention before using these totals for formal accounts.</p>}
           </section>}
 
           <section className="dashboard-grid">
@@ -589,7 +585,7 @@ export default function Home() {
             {capabilities.category && <article className="panel"><div className="panel-head"><div><p>WHERE MONEY COMES FROM</p><h2>Sales by category</h2></div></div><div className="bar-list">{categorySales.slice(0, 7).map(([name, value]) => <div className="bar-row" key={name}><div><span>{name}</span><strong>{compact.format(value)}</strong></div><div className="bar-track"><i style={{ width: `${value / maxCategory * 100}%` }} /></div></div>)}</div></article>}
             {capabilities.payment && <article className="panel"><div className="panel-head"><div><p>HOW CUSTOMERS PAY</p><h2>Payment methods used</h2></div></div><PaymentDonut payments={payments} currency={currency} /></article>}
             <article className="panel"><div className="panel-head"><div><p>BUSIEST DAYS</p><h2>Your average sales by weekday</h2></div></div><WeekdayChart days={weekday} max={maxWeekday} currency={currency} /></article>
-            <article className="panel insight-panel"><div><p>BUSINESS SNAPSHOT</p><h2>{topCategory ? `${topCategory[0]} brings in the most sales` : "Your sales data is ready"}</h2><p>{topCategory ? `${topCategory[0]} provides ${pct(topCategory[1] / Math.max(1, metrics.net))} of revenue. ${promotions.length ? `${promotions[0][0]} created the highest promotional discount value.` : "No promotion details are available for this view."} Open Sales Forecast to plan ahead.` : "Your main sales trends are ready. More views appear automatically when your file contains matching information."}</p></div><button onClick={() => setSection("forecast")}>Plan ahead →</button></article>
+            <article className="panel insight-panel"><div><p>BUSINESS SNAPSHOT</p><h2>{topCategory ? `${topCategory[0]} brings in the most sales` : "Your sales data is ready"}</h2><p>{topCategory ? `${topCategory[0]} provides ${pct(topCategory[1] / Math.max(1, metrics.net))} of revenue. ${promotions.length ? `${promotions[0][0]} created the highest promotional discount value.` : "No promotion details are available for this view."} Open Sales Forecast to plan ahead.` : "Your main sales trends are ready. More views appear automatically when your file contains matching information."}</p></div><button onClick={() => setSection("forecast")}>Sales Forecast</button></article>
           </section>
         </>}
 
@@ -606,7 +602,7 @@ export default function Home() {
 
         {section === "forecast" && forecast && <>
           <section className="forecast-hero">
-            <div><p className="eyebrow">YOUR SALES FORECAST</p><h2>Expected sales for the next {forecastDays} days</h2><div className="forecast-value"><strong>{money.format(futureTotal)}</strong><span className={forecastChange >= 0 ? "positive-pill" : "negative-pill"}>{forecastChange >= 0 ? "+" : ""}{pct(forecastChange)} compared with the previous {forecastDays} days</span></div><p>Based on {dataProfile.historyDays} days of your sales history. RetailPulse checked several approaches and chose the one that worked best on your past data.</p></div>
+            <div><h2>Expected sales for the next {forecastDays} days</h2><div className="forecast-value"><strong>{money.format(futureTotal)}</strong><span className={forecastChange >= 0 ? "positive-pill" : "negative-pill"}>{forecastChange >= 0 ? "+" : ""}{pct(forecastChange)} compared with the previous {forecastDays} days</span></div><p>Based on {dataProfile.historyDays} days of your sales history. RetailPulse checked several approaches and chose the one that worked best on your past data.</p></div>
             {horizonSelector}
           </section>
           {businessAdviser}
@@ -627,13 +623,12 @@ export default function Home() {
         </section>}
 
         {section === "methodology" && <section className="methodology">
-          <div className="method-intro"><h2>How RetailPulse creates your forecast</h2><p>You do not need to choose a statistical model. RetailPulse checks the options, shows how close they were on past sales, and explains the result in everyday language.</p></div>
-          <div className="method-flow"><article><span>1</span><div><h3>Understand your spreadsheet</h3><p>RetailPulse automatically finds the date, sales and other useful columns in your file.</p></div></article><article><span>2</span><div><h3>Check the information</h3><p>Invalid dates and sales values are skipped, and missing financial figures are never invented.</p></div></article><article><span>3</span><div><h3>Find what works best</h3><p>Several forecasting approaches are tried on older parts of your own sales history. The approach that came closest is used.</p></div></article><article><span>4</span><div><h3>Turn the result into action</h3><p>The forecast provides the numbers. DeepSeek can then explain them and suggest practical questions or actions.</p></div></article></div>
-          <div className="method-cards"><article><p>CHECKED ON YOUR HISTORY</p><strong>Past performance first</strong><span>The dashboard tests each approach on sales it already knows, before using it for the future.</span></article><article><p>NO MADE-UP NUMBERS</p><strong>Calculations stay separate from AI</strong><span>The forecast engine calculates the estimate. AI only explains verified results.</span></article><article><p>PRIVATE BY DESIGN</p><strong>Your raw rows stay local</strong><span>Your spreadsheet is read in this browser and is not uploaded to DeepSeek.</span></article></div>
+          <div className="method-intro"><h2>How RetailPulse creates your forecast</h2><p>You don't need to choose a statistical forecasting model. RetailPulse tests different models using your sales history and selects the one that performs best.</p></div>
+          <div className="method-flow"><article><span>1</span><div><h3>Understand your spreadsheet</h3><p>RetailPulse automatically finds the date, sales and other useful columns in your file.</p></div></article><article><span>2</span><div><h3>Check the information</h3><p>Invalid dates and sales values are skipped, and missing financial figures are never invented.</p></div></article><article><span>3</span><div><h3>Find what works best</h3><p>RetailPulse tests several statistical forecasting models using your past sales data and selects the one that best matches your actual sales.</p></div></article><article><span>4</span><div><h3>Explain the result</h3><p>The forecast provides the numbers. AI can then explain what the results could mean for your business and suggest practical actions.</p></div></article></div>
+          <div className="method-cards"><article><p>CHECKED AGAINST YOUR HISTORY</p><strong>Past performance first</strong><span>The dashboard tests each approach on sales it already knows, before using it for the future.</span></article><article><p>NO MADE-UP NUMBERS</p><strong>Calculations stay separate from AI</strong><span>The forecast engine calculates the estimate. AI only explains verified results.</span></article><article><p>PRIVATE BY DESIGN</p><strong>Your raw data stays local</strong><span>Your spreadsheet is read in this browser and is not uploaded to AI.</span></article></div>
 
-          <div className="disclosure"><strong>How your data is used</strong><p>Your spreadsheet rows are processed in this browser and are not retained. Only daily date-and-sales totals go to the forecasting service. DeepSeek receives only aggregated business totals and forecast results when you click “Summarise my business.”</p></div>
+          <div className="disclosure"><strong>How your data is used</strong><p>Your spreadsheet is processed in your browser and is not stored. Only daily sales totals are sent to the forecasting service. When you click “Analyze,” AI receives only aggregated business totals and forecast results, not your raw sales data.</p></div>
         </section>}
-        <footer><span>RetailPulse · Sales intelligence for SMEs</span><span>Use forecasts as a planning guide alongside your business knowledge.</span></footer>
       </section>
     </main>
   );

@@ -19,11 +19,9 @@ export function AuthShell({
           <div><strong>RetailPulse</strong><small>AI Sales Intelligence</small></div>
         </Link>
         <div className="auth-story-copy">
-          <p>PRIVATE SALES WORKSPACE</p>
-          <h1>Turn your own transaction data into a clearer next decision.</h1>
+          <h1>Turn Your Sales Data Into Smarter Decisions</h1>
           <span>Secure account access, browser-based CSV analysis, evidence-led forecasts, and no preloaded business data.</span>
         </div>
-        <div className="auth-trust"><i>✓</i><span><strong>Your data stays in your browser</strong><small>Uploaded CSV files are processed locally and are not stored by RetailPulse.</small></span></div>
       </section>
       <section className="auth-panel">
         <div className="auth-card">

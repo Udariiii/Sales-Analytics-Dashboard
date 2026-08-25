@@ -5,7 +5,7 @@ function dot(left: number[], right: number[]) {
 }
 
 export async function mapColumnsWithLocalAI(profiles: ColumnProfile[], onProgress?: (message: string) => void): Promise<MappingChoice[]> {
-  onProgress?.("Downloading the private browser AI model for its first use…");
+  onProgress?.("Downloading the private browser AI model…");
   const { pipeline } = await import("@huggingface/transformers");
   const extractor = await pipeline("feature-extraction", "onnx-community/all-MiniLM-L6-v2-ONNX", { dtype: "q4" });
   onProgress?.("AI is interpreting headers and sample value types…");
