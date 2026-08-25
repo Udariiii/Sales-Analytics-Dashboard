@@ -162,7 +162,9 @@ test("integrates StatsForecast and DeepSeek without exposing raw rows or secrets
   assert.match(page, />3 months</);
   assert.doesNotMatch(page, />6 months</);
   assert.match(page, /AI BUSINESS ADVISER/);
-  assert.match(page, /Explain this forecast/);
+  assert.match(page, /Summarise my business/);
+  assert.match(page, /businessSnapshot/);
+  assert.match(page, /Business highlights/);
   assert.doesNotMatch(page, /<span>Confidence<\/span>/);
   assert.match(service, /AutoETS/);
   assert.match(service, /SeasonalNaive/);
@@ -175,6 +177,7 @@ test("integrates StatsForecast and DeepSeek without exposing raw rows or secrets
   assert.doesNotMatch(page, /className="loading"/);
   assert.match(insightRoute, /deepseek-v4-flash/);
   assert.match(insightRoute, /DEEPSEEK_API_KEY/);
+  assert.match(insightRoute, /result\?\.highlights/);
   assert.doesNotMatch(insightRoute, /NEXT_PUBLIC_DEEPSEEK/);
   assert.match(renderConfig, /rootDir: forecast_service/);
   assert.match(envExample, /NEXT_PUBLIC_FORECAST_API_URL/);

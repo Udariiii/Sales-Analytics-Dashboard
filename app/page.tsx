@@ -213,7 +213,7 @@ function WeekdayChart({ days, max, currency }: { days: { name: string; value: nu
 
 function Icon({ children }: { children: React.ReactNode }) { return <span className="icon" aria-hidden="true">{children}</span>; }
 
-type DeepSeekInsight = { headline: string; summary: string; actions: string[]; risks: string[] };
+type DeepSeekInsight = { headline: string; summary: string; highlights: string[]; actions: string[]; risks: string[] };
 
 function combineForecasts(local: ForecastResult | null, stats: ForecastResult | null) {
   if (!local) return stats;
@@ -422,6 +422,52 @@ export default function Home() {
   const maxProduct = productSales[0]?.[1] || 1;
   const maxWeekday = Math.max(...weekday.map((d) => d.value), 1);
 
+  const businessSnapshot = useMemo(() => {
+    const totalRevenue = rows.reduce((sum, row) => sum + row.net, 0);
+    const totalProfit = rows.reduce((sum, row) => sum + row.profit, 0);
+    const itemsSold = rows.reduce((sum, row) => sum + row.quantity, 0);
+    const invoiceCount = new Set(rows.map((row) => row.invoice).filter(Boolean)).size;
+    const recentDays = dailyAll.slice(-30);
+    const previousDays = dailyAll.slice(-60, -30);
+    const recentRevenue = recentDays.reduce((sum, day) => sum + day.sales, 0);
+    const previousRevenue = previousDays.reduce((sum, day) => sum + day.sales, 0);
+    const allCategories = capabilities.category ? sumBy(rows, "category", "net") : [];
+    const allProducts = capabilities.product ? sumBy(rows, "product", "net") : [];
+    const allPayments = capabilities.payment ? sumBy(rows, "payment", "net") : [];
+    const allPromotions = capabilities.promotion ? sumBy(rows.filter((row) => row.promotion !== "None"), "promotion", "discount") : [];
+    const weekdaySums = Array(7).fill(0) as number[];
+    const weekdayCounts = Array(7).fill(0) as number[];
+    const weekdayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    dailyAll.forEach((day) => {
+      const index = new Date(`${day.date}T00:00:00Z`).getUTCDay();
+      weekdaySums[index] += day.sales;
+      weekdayCounts[index]++;
+    });
+    const busiestWeekday = weekdayNames
+      .map((name, index) => ({ name, averageRevenue: weekdayCounts[index] ? weekdaySums[index] / weekdayCounts[index] : 0 }))
+      .sort((a, b) => b.averageRevenue - a.averageRevenue)[0];
+
+    return {
+      dataPeriod: { from: dailyAll[0]?.date, to: dailyAll.at(-1)?.date, days: dailyAll.length },
+      totalRevenue,
+      salesRecords: rows.length,
+      recent30DayRevenue: recentRevenue,
+      changeFromPrevious30Days: previousDays.length === 30 && previousRevenue ? recentRevenue / previousRevenue - 1 : null,
+      grossProfit: capabilities.profit ? totalProfit : null,
+      grossMarginPercent: capabilities.profit && totalRevenue ? totalProfit / totalRevenue * 100 : null,
+      itemsSold: capabilities.quantity ? itemsSold : null,
+      customerSales: capabilities.invoices ? invoiceCount : null,
+      averageCustomerSale: capabilities.invoices && invoiceCount ? totalRevenue / invoiceCount : null,
+      leadingCategories: allCategories.slice(0, 3).map(([name, revenue]) => ({ name, revenue, sharePercent: totalRevenue ? revenue / totalRevenue * 100 : 0 })),
+      leadingProducts: allProducts.slice(0, 3).map(([name, revenue]) => ({ name, revenue })),
+      busiestWeekday,
+      leadingPaymentMethod: allPayments[0] ? { name: allPayments[0][0], revenueSharePercent: totalRevenue ? allPayments[0][1] / totalRevenue * 100 : 0 } : null,
+      mainPromotion: allPromotions[0] ? { name: allPromotions[0][0], discountValue: allPromotions[0][1] } : null,
+      categoryMomentum: categoryForecasts.slice(0, 3).map((item) => ({ name: item.name, recentChangePercent: item.change * 100 })),
+      dataQuality: { acceptedRows: importReport?.acceptedRows || rows.length, skippedRows: importReport?.rejectedRows || 0, possibleDuplicates: importReport?.exactDuplicateRows || 0 },
+    };
+  }, [rows, dailyAll, capabilities, categoryForecasts, importReport]);
+
   const generateDeepSeekInsight = async () => {
     if (!forecast) return;
     setDeepSeekState("loading");
@@ -433,6 +479,7 @@ export default function Home() {
         body: JSON.stringify({
           file: fileName,
           currency,
+          business: businessSnapshot,
           history: { days: dataProfile.historyDays, zeroDays: dataProfile.zeroDays, unusualDays: dataProfile.unusualDays },
           forecast: {
             horizonDays: forecastDays,
@@ -442,8 +489,7 @@ export default function Home() {
             typicalDailyDifference: Math.round(forecast.winner.mae),
             usualEstimateDifferencePercent: Math.round(forecast.winner.bias * 1000) / 10,
           },
-          currentSales: metrics.net,
-          topCategories: categorySales.slice(0, 5).map(([name, sales]) => ({ name, sales })),
+
         }),
       });
       const body = await response.json().catch(() => ({}));
@@ -564,7 +610,7 @@ export default function Home() {
             <article className="panel accuracy-card"><div className="panel-head"><div><p>HOW RELIABLE IS IT?</p><h2>How close past estimates were</h2></div></div><div className="accuracy-score"><strong>{pct(forecast.winner.wape)}</strong><span>Typical past difference · lower is better</span></div><dl><div><dt>Chosen approach</dt><dd>{friendlyModelName(forecast.winner.name)}</dd></div><div><dt>Typical daily difference</dt><dd>±{money.format(forecast.winner.mae)}</dd></div><div><dt>Usual direction</dt><dd>{pct(Math.abs(forecast.winner.bias))} {forecast.winner.bias >= 0 ? "below actual sales" : "above actual sales"}</dd></div><div><dt>Past checks completed</dt><dd>{forecast.folds} periods covering {forecast.evaluatedDays} days</dd></div></dl></article>
             <article className="panel"><div className="panel-head"><div><p>WHY THIS ESTIMATE?</p><h2>Past performance of each approach</h2></div></div><div className="model-compare">{comparedModels.map((model) => <div className={model.name === forecast.winner.name ? "winner" : ""} key={model.name}><span>{friendlyModelName(model.name)}</span><strong>{pct(model.wape)} difference</strong><i><b style={{ width: `${model.wape / maxComparedWape * 100}%` }} /></i></div>)}</div><small className="fine-print">Shorter bars performed better on past sales. RetailPulse automatically uses the best result for the period you selected.</small></article>
             {capabilities.category && <article className="panel span-2"><div className="panel-head"><div><p>PLAN BY CATEGORY</p><h2>Expected sales over the next {forecastDays} days</h2></div></div><div className="forecast-table"><div className="table-head"><span>Category</span><span>Expected sales</span><span>Expected items</span><span>Change</span></div>{categoryForecasts.map((c) => <div className="table-row" key={c.name}><strong>{c.name}</strong><span>{money.format(c.sales)}</span><span>{capabilities.quantity ? number.format(c.units) : "Not available"}</span><span className={c.change >= 0 ? "positive" : "negative"}>{c.change >= 0 ? "+" : ""}{pct(c.change)}</span></div>)}</div></article>}
-            <article className="panel executive-card"><div className="executive-label"><span>AI</span>AI BUSINESS ADVISER</div>{deepSeekInsight ? <><h2>{deepSeekInsight.headline}</h2><p>{deepSeekInsight.summary}</p><div className="ai-recommendations"><strong>Recommended actions</strong><ul>{deepSeekInsight.actions.map((action) => <li key={action}>{action}</li>)}</ul></div>{deepSeekInsight.risks.length > 0 && <div className="summary-action"><strong>Things to check</strong><span>{deepSeekInsight.risks.join(" ")}</span></div>}</> : <><h2>Turn this forecast into an action plan</h2><p>RetailPulse expects about {money.format(futureTotal)} in sales over the next {forecastDays} days. Past estimates using this approach differed by around {pct(forecast.winner.wape)}.</p><p>{topGrowth ? `${topGrowth.name} currently shows the strongest category growth at ${topGrowth.change >= 0 ? "+" : ""}${pct(topGrowth.change)}.` : "Category opportunities will appear when that information is available."}</p><button className="deepseek-button" disabled={deepSeekState === "loading"} onClick={generateDeepSeekInsight}>{deepSeekState === "loading" ? "Preparing recommendations…" : "Explain this forecast"}</button>{deepSeekMessage && <small className="deepseek-message">{deepSeekMessage}</small>}</>}</article>
+            <article className="panel executive-card"><div className="executive-label"><span>AI</span>AI BUSINESS ADVISER</div>{deepSeekInsight ? <><h2>{deepSeekInsight.headline}</h2><p>{deepSeekInsight.summary}</p>{deepSeekInsight.highlights.length > 0 && <div className="ai-recommendations"><strong>Business highlights</strong><ul>{deepSeekInsight.highlights.map((highlight) => <li key={highlight}>{highlight}</li>)}</ul></div>}<div className="ai-recommendations"><strong>Recommended actions</strong><ul>{deepSeekInsight.actions.map((action) => <li key={action}>{action}</li>)}</ul></div>{deepSeekInsight.risks.length > 0 && <div className="summary-action"><strong>Things to check</strong><span>{deepSeekInsight.risks.join(" ")}</span></div>}</> : <><h2>Get a clear business summary and action plan</h2><p>DeepSeek reviews the main totals and patterns found in your uploaded data, then explains what the forecast may mean for your business.</p><p>{topGrowth ? `${topGrowth.name} currently shows the strongest category growth at ${topGrowth.change >= 0 ? "+" : ""}${pct(topGrowth.change)}.` : "Category opportunities will appear when that information is available."}</p><button className="deepseek-button" disabled={deepSeekState === "loading"} onClick={generateDeepSeekInsight}>{deepSeekState === "loading" ? "Preparing your summary…" : "Summarise my business"}</button>{deepSeekMessage && <small className="deepseek-message">{deepSeekMessage}</small>}</>}</article>
             <article className="panel span-3 data-readiness"><div className="panel-head"><div><p>DATA BEHIND THIS FORECAST</p><h2>What RetailPulse used</h2></div></div><div><span><strong>{dataProfile.historyDays}</strong>days of sales history</span><span><strong>{dataProfile.zeroDays}</strong>days with no recorded sales</span><span><strong>{dataProfile.unusualDays}</strong>unusually high-sales days</span><span><strong>{importReport?.mappedFields.length || 2}</strong>useful columns identified</span></div></article>
           </section>
         </>}
@@ -580,7 +626,7 @@ export default function Home() {
           <div className="method-flow"><article><span>1</span><div><h3>Understand your spreadsheet</h3><p>RetailPulse automatically finds the date, sales and other useful columns in your file.</p></div></article><article><span>2</span><div><h3>Check the information</h3><p>Invalid dates and sales values are skipped, and missing financial figures are never invented.</p></div></article><article><span>3</span><div><h3>Find what works best</h3><p>Several forecasting approaches are tried on older parts of your own sales history. The approach that came closest is used.</p></div></article><article><span>4</span><div><h3>Turn the result into action</h3><p>The forecast provides the numbers. DeepSeek can then explain them and suggest practical questions or actions.</p></div></article></div>
           <div className="method-cards"><article><p>CHECKED ON YOUR HISTORY</p><strong>Past performance first</strong><span>The dashboard tests each approach on sales it already knows, before using it for the future.</span></article><article><p>NO MADE-UP NUMBERS</p><strong>Calculations stay separate from AI</strong><span>The forecast engine calculates the estimate. AI only explains verified results.</span></article><article><p>PRIVATE BY DESIGN</p><strong>Your raw rows stay local</strong><span>Your spreadsheet is read in this browser and is not uploaded to DeepSeek.</span></article></div>
           <details className="technical-details"><summary>Technical details for reviewers</summary><p>Forecasts compare weekly sales, AutoETS, and calendar/yearly patterns. The option with the smallest difference across three historical checks is selected.</p></details>
-          <div className="disclosure"><strong>How your data is used</strong><p>Your spreadsheet rows are processed in this browser and are not retained. Only daily date-and-sales totals go to the forecasting service. DeepSeek receives a short summary only when you click “Explain this forecast.”</p></div>
+          <div className="disclosure"><strong>How your data is used</strong><p>Your spreadsheet rows are processed in this browser and are not retained. Only daily date-and-sales totals go to the forecasting service. DeepSeek receives only aggregated business totals and forecast results when you click “Summarise my business.”</p></div>
         </section>}
         <footer><span>RetailPulse · Sales intelligence for SMEs</span><span>Use forecasts as a planning guide alongside your business knowledge.</span></footer>
       </section>
