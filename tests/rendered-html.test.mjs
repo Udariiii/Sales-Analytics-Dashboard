@@ -181,7 +181,7 @@ test("integrates StatsForecast and DeepSeek without exposing raw rows or secrets
   assert.match(page, /For more reliable forecasts/);
   assert.match(page, /Your uploaded data contains/);
   assert.match(page, /forecast: forecast \?/);
-  assert.match(page, /Your advanced forecast is loading/);
+  assert.match(page, /Your forecast is loading/);
   assert.match(page, /forecast\.winner\.wape > 0\.2/);
   assert.doesNotMatch(page, /Advanced forecast ready|className=\{`service-status/);
   assert.match(page, /statsForecast\?\.points\.length === forecastDays/);

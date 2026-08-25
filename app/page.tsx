@@ -597,7 +597,7 @@ export default function Home() {
 
         {section === "forecast" && localForecast && !forecast && <>
           <section className="panel forecast-period-picker"><div><p className="eyebrow">CHOOSE FORECAST PERIOD</p><h2>How far ahead do you want to plan?</h2></div>{horizonSelector}</section>
-          <section className="panel forecast-loading" role="status" aria-live="polite"><span className="forecast-loading-spinner" aria-hidden="true" /><div><p className="eyebrow">PREPARING YOUR FORECAST</p><h2>Your advanced forecast is loading</h2><p>The forecasting engine is checking your sales history and choosing the approach that worked best on your past data. This may take a little time.</p></div></section>
+          <section className="panel forecast-loading" role="status" aria-live="polite"><span className="forecast-loading-spinner" aria-hidden="true" /><div><p className="eyebrow">PREPARING YOUR FORECAST</p><h2>Your forecast is loading</h2><p>The forecasting engine is checking your sales history and choosing the approach that worked best on your past data. This may take a little time.</p></div></section>
         </>}
 
         {section === "forecast" && forecast && <>
