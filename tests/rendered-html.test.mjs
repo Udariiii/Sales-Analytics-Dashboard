@@ -53,8 +53,10 @@ test("includes flexible local-AI importing and rolling predictive analysis", asy
   assert.doesNotMatch(page, /SIMPLE NEXT STEPS|Made for business owners|Technical details for reviewers/);
   assert.match(page, /input\.value = ""/);
   assert.match(page, /YOUR SALES FORECAST/);
-  assert.match(page, /How close past estimates were/);
-  assert.doesNotMatch(page, /forecast accuracy|Model accuracy/i);
+  assert.match(page, /Forecast accuracy on past sales/);
+  assert.match(page, /Math\.max\(0, 1 - forecast\.winner\.wape\)/);
+  assert.match(page, /Typical difference from past sales/);
+  assert.doesNotMatch(page, /Model accuracy/i);
   assert.match(forecastModule, /Seasonal naive/);
   assert.match(forecastModule, /Calendar ridge/);
   assert.match(forecastModule, /Robust weekday average/);
