@@ -48,7 +48,9 @@ test("includes flexible local-AI importing and rolling predictive analysis", asy
   assert.match(aiMapper, /dtype: "q4"/);
   assert.match(aiMapper, /Local AI \+ validation/);
   assert.match(page, /buildForecast\(dailyAll, forecastDays\)/);
-  assert.match(page, /Upload complete/);
+  assert.match(page, /File uploaded successfully/);
+  assert.match(page, /window\.setTimeout\(\(\) => setUploadNotice\(""\), 4_500\)/);
+  assert.doesNotMatch(page, /SIMPLE NEXT STEPS|Made for business owners|Technical details for reviewers/);
   assert.match(page, /input\.value = ""/);
   assert.match(page, /YOUR SALES FORECAST/);
   assert.match(page, /How close past estimates were/);

@@ -285,7 +285,7 @@ export default function Home() {
       setCategory("All categories");
       setPeriod("Full year");
       setSection("overview");
-      setUploadNotice(`${file.name} is ready — ${number.format(applied.report.acceptedRows)} sales records loaded using ${applied.report.mappedFields.length} useful columns.`);
+      setUploadNotice(file.name);
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : "The selected file could not be read.");
     } finally {
@@ -294,6 +294,11 @@ export default function Home() {
     }
   };
 
+  useEffect(() => {
+    if (!uploadNotice) return;
+    const timeoutId = window.setTimeout(() => setUploadNotice(""), 4_500);
+    return () => window.clearTimeout(timeoutId);
+  }, [uploadNotice]);
 
   const categories = useMemo(() => capabilities.category ? ["All categories", ...new Set(rows.map((r) => r.category))] : ["All categories"], [rows, capabilities.category]);
   const filtered = useMemo(() => {
@@ -541,7 +546,7 @@ export default function Home() {
           <button disabled={!capabilities.product && !capabilities.category} className={section === "products" ? "active" : ""} onClick={() => setSection("products")}><Icon>▦</Icon>What sells best</button>
           <button className={section === "methodology" ? "active" : ""} onClick={() => setSection("methodology")}><Icon>◎</Icon>How it works</button>
         </nav>
-        <div className="sidebar-note"><span>Made for business owners</span><p>Clear answers from your own sales data, without analytics jargon.</p></div>
+
       </aside>
 
       <section className="workspace">
@@ -555,7 +560,7 @@ export default function Home() {
         </header>
 
         {error && <div className="error-banner"><strong>File issue</strong><span>{error}</span></div>}
-        {uploadNotice && <div className="upload-success" role="status" data-testid="upload-status"><span className="success-check">✓</span><div><strong>Upload complete</strong><span>{uploadNotice}</span></div><button aria-label="Dismiss upload message" onClick={() => setUploadNotice("")}>×</button></div>}
+        {uploadNotice && <div className="upload-toast" role="status" aria-live="polite" data-testid="upload-status"><span className="success-check">✓</span><div><strong>File uploaded successfully</strong><span>{uploadNotice} is ready to use.</span></div><button aria-label="Dismiss upload message" onClick={() => setUploadNotice("")}>×</button></div>}
 
         {section !== "methodology" && section !== "forecast" && <div className="filterbar">
           {capabilities.category && <label>Category<select value={category} onChange={(e) => setCategory(e.target.value)}>{categories.map((c) => <option key={c}>{c}</option>)}</select></label>}
@@ -617,14 +622,14 @@ export default function Home() {
         {section === "products" && <section className="dashboard-grid products-grid">
           {capabilities.product && <article className="panel span-2"><div className="panel-head"><div><p>YOUR BEST SELLERS</p><h2>Products bringing in the most revenue</h2></div></div><div className="product-ranking">{productSales.map(([name, value], i) => <div key={name}><span className="rank">{String(i + 1).padStart(2, "0")}</span><div><strong>{name}</strong><i><b style={{ width: `${value / maxProduct * 100}%` }} /></i></div><span>{money.format(value)}</span></div>)}</div></article>}
           {capabilities.category && <article className="panel"><div className="panel-head"><div><p>YOUR SALES MIX</p><h2>Share of sales by category</h2></div></div><div className="category-cards">{categorySales.slice(0, 5).map(([name, value], i) => <div key={name}><span>{i + 1}</span><div><strong>{name}</strong><small>{pct(value / Math.max(1, metrics.net))} of sales</small></div><b>{compact.format(value)}</b></div>)}</div></article>}
-          <article className="panel span-3"><div className="panel-head"><div><p>SIMPLE NEXT STEPS</p><h2>How to use these product insights</h2></div></div><div className="decision-steps"><div><span>01</span><strong>Protect best sellers</strong><p>Keep your strongest products available because stock-outs here put the most revenue at risk.</p></div><div><span>02</span><strong>Plan stock</strong><p>{capabilities.quantity ? "Compare expected item demand with supplier delivery time before placing orders." : "Include an item quantity column next time to unlock stock planning."}</p></div><div><span>03</span><strong>Check weekly</strong><p>Compare actual demand with the forecast each week and investigate large changes early.</p></div></div></article>
+
         </section>}
 
         {section === "methodology" && <section className="methodology">
           <div className="method-intro"><h2>How RetailPulse creates your forecast</h2><p>You do not need to choose a statistical model. RetailPulse checks the options, shows how close they were on past sales, and explains the result in everyday language.</p></div>
           <div className="method-flow"><article><span>1</span><div><h3>Understand your spreadsheet</h3><p>RetailPulse automatically finds the date, sales and other useful columns in your file.</p></div></article><article><span>2</span><div><h3>Check the information</h3><p>Invalid dates and sales values are skipped, and missing financial figures are never invented.</p></div></article><article><span>3</span><div><h3>Find what works best</h3><p>Several forecasting approaches are tried on older parts of your own sales history. The approach that came closest is used.</p></div></article><article><span>4</span><div><h3>Turn the result into action</h3><p>The forecast provides the numbers. DeepSeek can then explain them and suggest practical questions or actions.</p></div></article></div>
           <div className="method-cards"><article><p>CHECKED ON YOUR HISTORY</p><strong>Past performance first</strong><span>The dashboard tests each approach on sales it already knows, before using it for the future.</span></article><article><p>NO MADE-UP NUMBERS</p><strong>Calculations stay separate from AI</strong><span>The forecast engine calculates the estimate. AI only explains verified results.</span></article><article><p>PRIVATE BY DESIGN</p><strong>Your raw rows stay local</strong><span>Your spreadsheet is read in this browser and is not uploaded to DeepSeek.</span></article></div>
-          <details className="technical-details"><summary>Technical details for reviewers</summary><p>Forecasts compare weekly sales, AutoETS, and calendar/yearly patterns. The option with the smallest difference across three historical checks is selected.</p></details>
+
           <div className="disclosure"><strong>How your data is used</strong><p>Your spreadsheet rows are processed in this browser and are not retained. Only daily date-and-sales totals go to the forecasting service. DeepSeek receives only aggregated business totals and forecast results when you click “Summarise my business.”</p></div>
         </section>}
         <footer><span>RetailPulse · Sales intelligence for SMEs</span><span>Use forecasts as a planning guide alongside your business knowledge.</span></footer>
