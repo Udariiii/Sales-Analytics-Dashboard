@@ -172,6 +172,10 @@ test("integrates StatsForecast and DeepSeek without exposing raw rows or secrets
   assert.match(page, /For more reliable forecasts/);
   assert.match(page, /Your uploaded data contains/);
   assert.match(page, /forecast: forecast \?/);
+  assert.match(page, /Your advanced forecast is loading/);
+  assert.match(page, /Quick backup forecast/);
+  assert.match(page, /statsForecast\?\.points\.length === forecastDays/);
+  assert.doesNotMatch(page, /combineForecasts|Hybrid selection/);
   assert.doesNotMatch(page, /<span>Confidence<\/span>/);
   assert.match(service, /AutoETS/);
   assert.match(service, /SeasonalNaive/);

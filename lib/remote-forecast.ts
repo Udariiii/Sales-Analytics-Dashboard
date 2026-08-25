@@ -20,7 +20,7 @@ export async function requestStatsForecast(daily: DailyPoint[], horizon: number,
     if (!response.ok) throw new Error(body.detail || "The online forecast could not complete this request.");
     return body as ForecastResult;
   } catch (error) {
-    if (timedOut) throw new Error("The online forecast took too long, so the quick forecast is shown instead.");
+    if (timedOut) throw new Error("The advanced forecast took too long, so the quick backup forecast is shown.");
     throw error;
   } finally {
     clearTimeout(timeoutId);

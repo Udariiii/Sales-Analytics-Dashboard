@@ -215,21 +215,6 @@ function Icon({ children }: { children: React.ReactNode }) { return <span classN
 
 type DeepSeekInsight = { headline: string; summary: string; highlights: string[]; actions: string[]; risks: string[] };
 
-function combineForecasts(local: ForecastResult | null, stats: ForecastResult | null) {
-  if (!local) return stats;
-  if (!stats) return local;
-  const selected = stats.winner.wape < local.winner.wape ? stats : local;
-  const models = [...local.models, ...stats.models]
-    .filter((model, index, all) => all.findIndex((candidate) => candidate.name === model.name) === index)
-    .sort((a, b) => a.wape - b.wape);
-  return {
-    ...selected,
-    models,
-    baseline: local.baseline,
-    relativeImprovement: local.baseline.wape ? (local.baseline.wape - selected.winner.wape) / local.baseline.wape : 0,
-    engine: "Hybrid selection" as const,
-  };
-}
 
 export default function Home() {
   const [rows, setRows] = useState<FlexibleSalesRow[]>([]);
@@ -250,6 +235,7 @@ export default function Home() {
   const [deepSeekInsight, setDeepSeekInsight] = useState<DeepSeekInsight | null>(null);
   const [deepSeekState, setDeepSeekState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [deepSeekMessage, setDeepSeekMessage] = useState("");
+  const forecastApiConfigured = Boolean(process.env.NEXT_PUBLIC_FORECAST_API_URL);
 
   const money = useMemo(() => new Intl.NumberFormat("en", { style: "currency", currency, maximumFractionDigits: 0 }), [currency]);
   const capabilities: AnalyticsCapabilities = importReport?.capabilities || {
@@ -292,6 +278,9 @@ export default function Home() {
       } catch {
         applied = applyMapping(preview, safeMappings);
       }
+      setStatsForecast(null);
+      setForecastServiceState("idle");
+      setForecastServiceMessage("");
       setRows(applied.rows);
       setImportReport(applied.report);
       setFileName(file.name);
@@ -334,30 +323,36 @@ export default function Home() {
       setForecastServiceMessage("");
       return;
     }
-    if (!process.env.NEXT_PUBLIC_FORECAST_API_URL) {
+    if (!forecastApiConfigured) {
       setForecastServiceState("setup");
-      setForecastServiceMessage("The quick forecast is ready. Connect the online forecast service to compare more approaches.");
+      setForecastServiceMessage("The advanced forecasting engine is not connected, so the quick backup forecast is shown.");
       return;
     }
     const controller = new AbortController();
     setForecastServiceState("loading");
-    setForecastServiceMessage("Checking additional forecast approaches. You can use the estimate below while this finishes.");
+    setForecastServiceMessage("The advanced forecasting engine is checking your sales history.");
     requestStatsForecast(dailyAll, forecastDays, controller.signal)
       .then((result) => {
         setStatsForecast(result);
         setForecastServiceState("ready");
-        setForecastServiceMessage("Several approaches were checked against past sales. The best-performing estimate is now shown.");
+        setForecastServiceMessage("The advanced forecasting engine checked several approaches against past sales. Its best-performing estimate is now shown.");
       })
       .catch((forecastError) => {
         if (forecastError instanceof DOMException && forecastError.name === "AbortError") return;
         setForecastServiceState("fallback");
-        setForecastServiceMessage(forecastError instanceof Error ? forecastError.message : "The online check is unavailable, so the quick forecast is shown instead.");
+        setForecastServiceMessage(forecastError instanceof Error ? forecastError.message : "The advanced forecast is unavailable, so the quick backup forecast is shown.");
       });
     return () => controller.abort();
-  }, [dailyAll, forecastDays, localForecast]);
+  }, [dailyAll, forecastDays, localForecast, forecastApiConfigured]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
-  const forecast = useMemo(() => combineForecasts(localForecast, statsForecast), [localForecast, statsForecast]);
+  const quickFallbackActive = !forecastApiConfigured || forecastServiceState === "setup" || forecastServiceState === "fallback";
+  const forecast = useMemo(() => {
+    if (!localForecast) return null;
+    if (forecastServiceState === "ready" && statsForecast?.points.length === forecastDays) return statsForecast;
+    if (quickFallbackActive) return localForecast;
+    return null;
+  }, [localForecast, statsForecast, forecastDays, forecastServiceState, quickFallbackActive]);
   const categorySales = useMemo(() => capabilities.category ? sumBy(filtered, "category", "net") : [], [filtered, capabilities.category]);
   const productSales = useMemo(() => capabilities.product ? sumBy(filtered, "product", "net").slice(0, 10) : [], [filtered, capabilities.product]);
   const payments = useMemo(() => capabilities.payment ? sumBy(filtered, "payment", "net") : [], [filtered, capabilities.payment]);
@@ -599,10 +594,15 @@ export default function Home() {
           </section>
         </>}
 
-        {section === "forecast" && !forecast && <>
+        {section === "forecast" && !localForecast && <>
           <section className="panel forecast-period-picker"><div><p className="eyebrow">CHOOSE FORECAST PERIOD</p><h2>How far ahead do you want to plan?</h2></div>{horizonSelector}</section>
           <div className="forecast-validation" role="alert"><strong>More sales history is needed</strong><span>Your uploaded data contains {dailyAll.length} calendar days. A {forecastDays}-day forecast needs at least {minimumHistoryDays(forecastDays)} calendar days. Upload at least {Math.max(0, minimumHistoryDays(forecastDays) - dailyAll.length)} more days, or choose a shorter forecast period.</span></div>
           <section className="dashboard-grid forecast-grid forecast-summary-only">{businessAdviser}</section>
+        </>}
+
+        {section === "forecast" && localForecast && !forecast && <>
+          <section className="panel forecast-period-picker"><div><p className="eyebrow">CHOOSE FORECAST PERIOD</p><h2>How far ahead do you want to plan?</h2></div>{horizonSelector}</section>
+          <section className="panel forecast-loading" role="status" aria-live="polite"><span className="forecast-loading-spinner" aria-hidden="true" /><div><p className="eyebrow">PREPARING YOUR FORECAST</p><h2>Your advanced forecast is loading</h2><p>The forecasting engine is checking your sales history and choosing the approach that worked best on your past data. This may take a little time.</p></div></section>
         </>}
 
         {section === "forecast" && forecast && <>
@@ -610,7 +610,7 @@ export default function Home() {
             <div><p className="eyebrow">YOUR SALES FORECAST</p><h2>Expected sales for the next {forecastDays} days</h2><div className="forecast-value"><strong>{money.format(futureTotal)}</strong><span className={forecastChange >= 0 ? "positive-pill" : "negative-pill"}>{forecastChange >= 0 ? "+" : ""}{pct(forecastChange)} compared with the previous {forecastDays} days</span></div><p>Based on {dataProfile.historyDays} days of your sales history. RetailPulse checked several approaches and chose the one that worked best on your past data.</p></div>
             {horizonSelector}
           </section>
-          <div className={`service-status is-${forecastServiceState}`} role="status"><strong>{forecastServiceState === "loading" ? "Improving your forecast" : forecastServiceState === "ready" ? "Forecast updated" : forecastServiceState === "setup" || forecastServiceState === "fallback" ? "Quick forecast active" : "Forecast ready"}</strong><span>{forecastServiceMessage || "The estimate with the smallest past difference is shown."}</span></div>
+          <div className={`service-status is-${forecastServiceState}`} role="status"><strong>{quickFallbackActive ? "Quick backup forecast" : "Advanced forecast ready"}</strong><span>{forecastServiceMessage || "The estimate with the smallest past difference is shown."}</span></div>
           <div className={`forecast-confidence ${forecast.confidence.toLowerCase().replace(" ", "-")}`} role="status"><strong>{cautiousForecast ? "Use with care" : "Useful for planning"}</strong><span>When tested on past sales, estimates typically differed by about {pct(forecast.winner.wape)}. {cautiousForecast ? "Plan using the shaded range, not only the centre number." : "Use this with what you know about upcoming promotions, holidays and stock changes."}</span></div>
           <section className="dashboard-grid forecast-grid">
             <article className="panel span-2"><div className="panel-head"><div><p>WHAT MAY HAPPEN NEXT</p><h2>Past sales and expected future sales</h2></div><div className="two-legends"><span className="legend"><i />Past sales</span><span className="legend forecast"><i />Expected sales range</span></div></div><LineChart historical={dailyAll} forecast={forecast.points} mode="forecast" currency={currency} /></article>
