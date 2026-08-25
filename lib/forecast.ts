@@ -223,7 +223,10 @@ function confidenceFor(wape: number, folds: number): ConfidenceLevel {
 }
 
 export function minimumHistoryDays(horizon: number) {
-  return 84 + horizon;
+  if (horizon <= 7) return 105;
+  if (horizon <= 30) return 174;
+  if (horizon <= 90) return 450;
+  return Math.max(450, 84 + horizon * 3, horizon * 5);
 }
 
 export function buildForecast(daily: DailyPoint[], horizon: number): ForecastResult | null {

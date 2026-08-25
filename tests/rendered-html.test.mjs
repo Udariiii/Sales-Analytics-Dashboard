@@ -126,6 +126,10 @@ test("distinguishes net from gross sales and rates from monetary amounts", () =>
 });
 
 test("forecasting uses horizon-specific rolling tests and honest confidence", () => {
+  assert.equal(minimumHistoryDays(7), 105);
+  assert.equal(minimumHistoryDays(30), 174);
+  assert.equal(minimumHistoryDays(90), 450);
+
   const start = "2025-01-01";
   const weeklyPattern = [40_000, 42_000, 45_000, 48_000, 55_000, 70_000, 62_000];
   const daily = Array.from({ length: 180 }, (_, index) => ({
@@ -165,6 +169,9 @@ test("integrates StatsForecast and DeepSeek without exposing raw rows or secrets
   assert.match(page, /Summarise my business/);
   assert.match(page, /businessSnapshot/);
   assert.match(page, /Business highlights/);
+  assert.match(page, /For more reliable forecasts/);
+  assert.match(page, /Your uploaded data contains/);
+  assert.match(page, /forecast: forecast \?/);
   assert.doesNotMatch(page, /<span>Confidence<\/span>/);
   assert.match(service, /AutoETS/);
   assert.match(service, /SeasonalNaive/);
@@ -178,6 +185,7 @@ test("integrates StatsForecast and DeepSeek without exposing raw rows or secrets
   assert.match(insightRoute, /deepseek-v4-flash/);
   assert.match(insightRoute, /DEEPSEEK_API_KEY/);
   assert.match(insightRoute, /result\?\.highlights/);
+  assert.match(insightRoute, /If the forecast field is null/);
   assert.doesNotMatch(insightRoute, /NEXT_PUBLIC_DEEPSEEK/);
   assert.match(renderConfig, /rootDir: forecast_service/);
   assert.match(envExample, /NEXT_PUBLIC_FORECAST_API_URL/);

@@ -33,7 +33,13 @@ class ForecastRequest(BaseModel):
 
 
 def minimum_history_days(horizon: int) -> int:
-    return max(91, horizon * 5)
+    if horizon <= 7:
+        return 105
+    if horizon <= 30:
+        return 174
+    if horizon <= 90:
+        return 450
+    return max(450, 84 + horizon * 3, horizon * 5)
 
 
 def _models():

@@ -469,7 +469,7 @@ export default function Home() {
   }, [rows, dailyAll, capabilities, categoryForecasts, importReport]);
 
   const generateDeepSeekInsight = async () => {
-    if (!forecast) return;
+    if (!rows.length) return;
     setDeepSeekState("loading");
     setDeepSeekMessage("");
     try {
@@ -481,15 +481,14 @@ export default function Home() {
           currency,
           business: businessSnapshot,
           history: { days: dataProfile.historyDays, zeroDays: dataProfile.zeroDays, unusualDays: dataProfile.unusualDays },
-          forecast: {
+          forecast: forecast ? {
             horizonDays: forecastDays,
             total: futureTotal,
             changeFromPreviousPeriod: forecastChange,
             typicalPastDifferencePercent: Math.round(forecast.winner.wape * 1000) / 10,
             typicalDailyDifference: Math.round(forecast.winner.mae),
             usualEstimateDifferencePercent: Math.round(forecast.winner.bias * 1000) / 10,
-          },
-
+          } : null,
         }),
       });
       const body = await response.json().catch(() => ({}));
@@ -502,6 +501,9 @@ export default function Home() {
     }
   };
 
+  const horizonSelector = <div className="horizon-toggle" aria-label="Forecast horizon"><button className={forecastDays === 7 ? "active" : ""} onClick={() => setForecastDays(7)}>7 days</button><button className={forecastDays === 30 ? "active" : ""} onClick={() => setForecastDays(30)}>30 days</button><button className={forecastDays === 90 ? "active" : ""} onClick={() => setForecastDays(90)}>3 months</button></div>;
+
+  const businessAdviser = <article className="panel executive-card"><div className="executive-label"><span>AI</span>AI BUSINESS ADVISER</div>{deepSeekInsight ? <><h2>{deepSeekInsight.headline}</h2><p>{deepSeekInsight.summary}</p>{deepSeekInsight.highlights.length > 0 && <div className="ai-recommendations"><strong>Business highlights</strong><ul>{deepSeekInsight.highlights.map((highlight) => <li key={highlight}>{highlight}</li>)}</ul></div>}<div className="ai-recommendations"><strong>Recommended actions</strong><ul>{deepSeekInsight.actions.map((action) => <li key={action}>{action}</li>)}</ul></div>{deepSeekInsight.risks.length > 0 && <div className="summary-action"><strong>Things to check</strong><span>{deepSeekInsight.risks.join(" ")}</span></div>}</> : <><h2>{forecast ? "Get a clear business summary and action plan" : "Understand your current business performance"}</h2><p>{forecast ? "DeepSeek reviews the main totals and patterns found in your uploaded data, then explains what the forecast may mean for your business." : "There is not enough history for this forecast, but DeepSeek can still explain the main totals and patterns in your uploaded data."}</p>{forecast && <p>{topGrowth ? `${topGrowth.name} currently shows the strongest category growth at ${topGrowth.change >= 0 ? "+" : ""}${pct(topGrowth.change)}.` : "Category opportunities will appear when that information is available."}</p>}<button className="deepseek-button" disabled={deepSeekState === "loading"} onClick={generateDeepSeekInsight}>{deepSeekState === "loading" ? "Preparing your summary…" : "Summarise my business"}</button>{deepSeekMessage && <small className="deepseek-message">{deepSeekMessage}</small>}</>}</article>;
 
   if (loading) return <main className="app-loading"><div className="loading-mark">RP</div><h1>Preparing your dashboard</h1><p>{loadingMessage}</p><div className="loader"><span /></div><small>This usually takes less than a minute on first use.</small></main>;
 
@@ -528,6 +530,7 @@ export default function Home() {
           <p className="eyebrow">YOUR DATA, YOUR WORKSPACE</p>
           <h2>Upload almost any sales spreadsheet</h2>
           <p>Choose your file and RetailPulse will automatically understand it, check it, and take you straight to the insights your business can use.</p>
+          <div className="upload-history-tip"><strong>For more reliable forecasts</strong><span>Upload the longest complete sales history you have. You need at least 105 days for a 7-day forecast, 174 days for 30 days, and 450 days for 3 months. Longer, consistent history usually improves reliability.</span></div>
           <label className="upload-button upload-primary">Choose sales file<input aria-label="Upload sales data file" type="file" accept=".csv,.tsv,.txt,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={upload} /></label>
           <div className="upload-requirements">
             <div><strong>Accepted formats</strong><span>CSV, TSV and Excel XLSX · multiple worksheets supported</span></div>
@@ -596,12 +599,16 @@ export default function Home() {
           </section>
         </>}
 
-        {section === "forecast" && !forecast && <section className="panel forecast-unavailable"><p className="eyebrow">MORE SALES HISTORY NEEDED</p><h2>There is not enough past data for this forecast yet</h2><p>A {forecastDays}-day forecast needs at least {minimumHistoryDays(forecastDays)} days of sales history. Your file currently contains {dailyAll.length} days. Choose a shorter forecast period or upload more history.</p></section>}
+        {section === "forecast" && !forecast && <>
+          <section className="panel forecast-period-picker"><div><p className="eyebrow">CHOOSE FORECAST PERIOD</p><h2>How far ahead do you want to plan?</h2></div>{horizonSelector}</section>
+          <div className="forecast-validation" role="alert"><strong>More sales history is needed</strong><span>Your uploaded data contains {dailyAll.length} calendar days. A {forecastDays}-day forecast needs at least {minimumHistoryDays(forecastDays)} calendar days. Upload at least {Math.max(0, minimumHistoryDays(forecastDays) - dailyAll.length)} more days, or choose a shorter forecast period.</span></div>
+          <section className="dashboard-grid forecast-grid forecast-summary-only">{businessAdviser}</section>
+        </>}
 
         {section === "forecast" && forecast && <>
           <section className="forecast-hero">
             <div><p className="eyebrow">YOUR SALES FORECAST</p><h2>Expected sales for the next {forecastDays} days</h2><div className="forecast-value"><strong>{money.format(futureTotal)}</strong><span className={forecastChange >= 0 ? "positive-pill" : "negative-pill"}>{forecastChange >= 0 ? "+" : ""}{pct(forecastChange)} compared with the previous {forecastDays} days</span></div><p>Based on {dataProfile.historyDays} days of your sales history. RetailPulse checked several approaches and chose the one that worked best on your past data.</p></div>
-            <div className="horizon-toggle" aria-label="Forecast horizon"><button className={forecastDays === 7 ? "active" : ""} onClick={() => setForecastDays(7)}>7 days</button><button className={forecastDays === 30 ? "active" : ""} onClick={() => setForecastDays(30)}>30 days</button><button className={forecastDays === 90 ? "active" : ""} onClick={() => setForecastDays(90)}>3 months</button></div>
+            {horizonSelector}
           </section>
           <div className={`service-status is-${forecastServiceState}`} role="status"><strong>{forecastServiceState === "loading" ? "Improving your forecast" : forecastServiceState === "ready" ? "Forecast updated" : forecastServiceState === "setup" || forecastServiceState === "fallback" ? "Quick forecast active" : "Forecast ready"}</strong><span>{forecastServiceMessage || "The estimate with the smallest past difference is shown."}</span></div>
           <div className={`forecast-confidence ${forecast.confidence.toLowerCase().replace(" ", "-")}`} role="status"><strong>{cautiousForecast ? "Use with care" : "Useful for planning"}</strong><span>When tested on past sales, estimates typically differed by about {pct(forecast.winner.wape)}. {cautiousForecast ? "Plan using the shaded range, not only the centre number." : "Use this with what you know about upcoming promotions, holidays and stock changes."}</span></div>
@@ -610,7 +617,7 @@ export default function Home() {
             <article className="panel accuracy-card"><div className="panel-head"><div><p>HOW RELIABLE IS IT?</p><h2>How close past estimates were</h2></div></div><div className="accuracy-score"><strong>{pct(forecast.winner.wape)}</strong><span>Typical past difference · lower is better</span></div><dl><div><dt>Chosen approach</dt><dd>{friendlyModelName(forecast.winner.name)}</dd></div><div><dt>Typical daily difference</dt><dd>±{money.format(forecast.winner.mae)}</dd></div><div><dt>Usual direction</dt><dd>{pct(Math.abs(forecast.winner.bias))} {forecast.winner.bias >= 0 ? "below actual sales" : "above actual sales"}</dd></div><div><dt>Past checks completed</dt><dd>{forecast.folds} periods covering {forecast.evaluatedDays} days</dd></div></dl></article>
             <article className="panel"><div className="panel-head"><div><p>WHY THIS ESTIMATE?</p><h2>Past performance of each approach</h2></div></div><div className="model-compare">{comparedModels.map((model) => <div className={model.name === forecast.winner.name ? "winner" : ""} key={model.name}><span>{friendlyModelName(model.name)}</span><strong>{pct(model.wape)} difference</strong><i><b style={{ width: `${model.wape / maxComparedWape * 100}%` }} /></i></div>)}</div><small className="fine-print">Shorter bars performed better on past sales. RetailPulse automatically uses the best result for the period you selected.</small></article>
             {capabilities.category && <article className="panel span-2"><div className="panel-head"><div><p>PLAN BY CATEGORY</p><h2>Expected sales over the next {forecastDays} days</h2></div></div><div className="forecast-table"><div className="table-head"><span>Category</span><span>Expected sales</span><span>Expected items</span><span>Change</span></div>{categoryForecasts.map((c) => <div className="table-row" key={c.name}><strong>{c.name}</strong><span>{money.format(c.sales)}</span><span>{capabilities.quantity ? number.format(c.units) : "Not available"}</span><span className={c.change >= 0 ? "positive" : "negative"}>{c.change >= 0 ? "+" : ""}{pct(c.change)}</span></div>)}</div></article>}
-            <article className="panel executive-card"><div className="executive-label"><span>AI</span>AI BUSINESS ADVISER</div>{deepSeekInsight ? <><h2>{deepSeekInsight.headline}</h2><p>{deepSeekInsight.summary}</p>{deepSeekInsight.highlights.length > 0 && <div className="ai-recommendations"><strong>Business highlights</strong><ul>{deepSeekInsight.highlights.map((highlight) => <li key={highlight}>{highlight}</li>)}</ul></div>}<div className="ai-recommendations"><strong>Recommended actions</strong><ul>{deepSeekInsight.actions.map((action) => <li key={action}>{action}</li>)}</ul></div>{deepSeekInsight.risks.length > 0 && <div className="summary-action"><strong>Things to check</strong><span>{deepSeekInsight.risks.join(" ")}</span></div>}</> : <><h2>Get a clear business summary and action plan</h2><p>DeepSeek reviews the main totals and patterns found in your uploaded data, then explains what the forecast may mean for your business.</p><p>{topGrowth ? `${topGrowth.name} currently shows the strongest category growth at ${topGrowth.change >= 0 ? "+" : ""}${pct(topGrowth.change)}.` : "Category opportunities will appear when that information is available."}</p><button className="deepseek-button" disabled={deepSeekState === "loading"} onClick={generateDeepSeekInsight}>{deepSeekState === "loading" ? "Preparing your summary…" : "Summarise my business"}</button>{deepSeekMessage && <small className="deepseek-message">{deepSeekMessage}</small>}</>}</article>
+            {businessAdviser}
             <article className="panel span-3 data-readiness"><div className="panel-head"><div><p>DATA BEHIND THIS FORECAST</p><h2>What RetailPulse used</h2></div></div><div><span><strong>{dataProfile.historyDays}</strong>days of sales history</span><span><strong>{dataProfile.zeroDays}</strong>days with no recorded sales</span><span><strong>{dataProfile.unusualDays}</strong>unusually high-sales days</span><span><strong>{importReport?.mappedFields.length || 2}</strong>useful columns identified</span></div></article>
           </section>
         </>}
