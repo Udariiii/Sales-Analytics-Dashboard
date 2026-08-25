@@ -587,7 +587,7 @@ export default function Home() {
             <div><span>Sales records used</span><strong>{number.format(importReport.acceptedRows)}</strong></div>
             <div><span>Rows skipped</span><strong>{number.format(importReport.rejectedRows)}</strong></div>
             <div><span>Possible duplicates</span><strong>{number.format(importReport.exactDuplicateRows)}</strong></div>
-            <p>{importReport.rejectedRows || importReport.exactDuplicateRows ? "Some records may need attention before using these totals for formal accounts." : "Your sales file passed the automatic checks."}</p>
+            <p>{importReport.rejectedRows || importReport.exactDuplicateRows ? "Some records may need attention before using these totals for formal accounts." : "Your data is ready — no problems found."}</p>
           </section>}
 
           <section className="dashboard-grid">
